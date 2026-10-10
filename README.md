@@ -75,7 +75,9 @@ What this shows, and what it does not:
 
 **Per layer of Qwen3-8B** (one checker-loop run per linear-layer shape at 512 tokens, live on the chip):
 1.14x to 1.31x faster than the unblocked kernel on each of the four shapes, 14.6% less summed over
-the model's 252 projections. This is a sum of standalone kernel times, not the model running.
+the model's 252 projections (434.1 ms to 370.9 ms). AWS's compiler, with no hand-written kernel, sums to
+372.6 ms on the same four shapes, so the tuned kernel is level with it on every layer (between 1.5%
+faster and 0.05% slower). These are sums of standalone kernel times, not the model running.
 
 **Inside a model.** `inference/` puts the kernel into a traced PyTorch model on the chip and times whole-model
 inference (median wall clock of 50 calls). For two feed-forward blocks at Qwen3-8B's sizes, 512 tokens,
