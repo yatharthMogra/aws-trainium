@@ -15,6 +15,14 @@ Arms, so the result is a comparison and not an anecdote:
   raw        optimiser only, shown the raw profile numbers of every attempt so far
   template   optimiser + a fixed code-written sentence built from the profile (no checker model)
   checker    optimiser + the checker model's instruction
+  checker3   the checker model picks one move from a code-built menu of untried single-setting changes,
+             each annotated with what the measurements say about that direction
+  checker4   checker3, plus the optimiser's edit is compared with the instruction before any chip time
+             is spent and sent back if it changed the wrong line (built after reading the v3 log)
+  checker5   checker4, with far moves added to the menu and the answer given by naming the move
+  greedy5    greedy on checker5's menu
+  greedy     no model: the first menu option whose direction has a faster-than-slower record, else a
+             random menu option. The ablation for checker3 -- does the model choosing add anything?
   checker2   as checker, but the checker model is shown measured single-change comparisons and the
              legal values instead of raw profile lines (built after v1 lost to random; see evidence_text)
 
@@ -212,6 +220,130 @@ def checker2_instruction(a, hist, card, legal):
     return ask(a, prompt, 90)
 
 
+def menu(hist, legal, far=False):
+    """Checker v3's question to the model: a lettered list of single-setting moves from the best so far.
+
+    v2 fixed the direction (it stopped pushing N up) but then tied itself in knots -- "raising N from 6
+    to 12 made it slower, so lowering it back to 12" -- and re-proposed tried settings. So v3 removes
+    what the model was bad at and keeps what it is for: code lists the moves that are legal and
+    untried, each with the measured record for that direction, and the model CHOOSES. Each option is
+    the nearest untried legal value below or above the best-so-far in one setting.
+
+    far=True (checker v5) adds, per direction, the furthest untried legal value as well. The v4 log
+    showed why: it walked N down 24, 12, 8, 6, 4, 3, 2, 1 with the evidence agreeing at every step,
+    and from a distant start the ten attempts ran out before it arrived.
+    """
+    names = ("M", "N", "K")
+    timed = [h for h in hist if h["rec"].get("time_us")]
+    best = min(timed, key=lambda h: h["rec"]["time_us"])
+    tried = {tuple(h["knobs"]) for h in hist}
+    legal_set = set(legal)
+    record = {}   # (knob, "raise"/"lower") -> [faster, slower, same]
+    for j in range(3):
+        up = [0, 0, 0]
+        for a_ in timed:
+            for b_ in timed:
+                ka, kb = a_["knobs"], b_["knobs"]
+                if ka[j] < kb[j] and all(ka[i] == kb[i] for i in range(3) if i != j):
+                    ta, tb = a_["rec"]["time_us"], b_["rec"]["time_us"]
+                    up[0 if tb < ta * 0.99 else 1 if tb > ta * 1.01 else 2] += 1
+        record[(j, "raise")] = up
+        record[(j, "lower")] = [up[1], up[0], up[2]]
+    options = []
+    for j in range(3):
+        values = sorted({k[j] for k in legal})
+        for direction, seq in (("lower", [v for v in reversed(values) if v < best["knobs"][j]]),
+                               ("raise", [v for v in values if v > best["knobs"][j]])):
+            open_ = [v for v in seq if tuple(v if i == j else best["knobs"][i] for i in range(3)) in legal_set - tried]
+            picks = open_[:1] + (open_[-1:] if far and len(open_) > 1 else [])   # nearest, then furthest
+            for v in picks:
+                cand = tuple(v if i == j else best["knobs"][i] for i in range(3))
+                f, sl, same = record[(j, direction)]
+                n = f + sl + same
+                ev = ("no measurement of this direction yet" if n == 0 else
+                      f"measured so far: {'raising' if direction == 'raise' else 'lowering'} {names[j]} made it faster {f} of {n} times, slower {sl} of {n}")
+                options.append(dict(knobs=cand, knob=names[j], value=v,
+                                    text=f"Set {names[j]} to {v} ({direction} it from {best['knobs'][j]}) -- {ev}"))
+    head = (f"Best so far: M={best['knobs'][0]} N={best['knobs'][1]} K={best['knobs'][2]} at "
+            f"{best['rec']['time_us']:.0f} microseconds (compute engine busy {100 * best['rec']['te_busy']:.0f}%, "
+            f"data movement busy {100 * best['rec']['dma_busy']:.0f}%).")
+    return head, options
+
+
+def checker3_instruction(a, hist, card, legal):
+    """Checker v3: the model picks one move from a measured menu. Returns (instruction, chosen knobs)."""
+    head, options = menu(hist, legal)
+    if not options:
+        return "", None
+    letters = "ABCDEF"
+    listing = "\n".join(f"{letters[i]}. {o['text']}" for i, o in enumerate(options))
+    prompt = (f"{card}\n\nYou are the CHECKER. You decide the next change from measurements taken on the real chip.\n\n"
+              f"{head}\n\nUntried moves:\n{listing}\n\nPick the ONE move most likely to make the kernel faster. Prefer a "
+              f"direction the measurements show is faster; avoid one they show is slower; if nothing is measured for any "
+              f"move, pick any. Reply with the letter, then one sentence of reason.")
+    reply = ask(a, prompt, 70)
+    m = re.match(r"\W*([A-F])\b", reply.strip())
+    if not m or letters.index(m.group(1)) >= len(options):
+        return reply, None
+    o = options[letters.index(m.group(1))]
+    return o["text"].split(" -- ")[0] + ". " + reply.strip()[:200], o["knobs"]
+
+
+def checker5_instruction(a, hist, card, legal):
+    """Checker v5: v4's menu with far moves, answered by NAMING the move instead of a letter.
+
+    From the v4 log: "Raising N has historically made the kernel slower in all 15 previous attempts,
+    so it's best to avoid this direction" -- and the letter it gave was the one for raising N. The
+    reasoning was right and the letter was not, so the answer is now the move itself, which has to
+    match a listed move or it is asked again.
+    """
+    head, options = menu(hist, legal, far=True)
+    if not options:
+        return "", None
+    listing = "\n".join("- " + o["text"] for o in options)
+    prompt = (f"{card}\n\nYou are the CHECKER. You decide the next change from measurements taken on the real chip.\n\n"
+              f"{head}\n\nUntried moves:\n{listing}\n\nPick the ONE move most likely to make the kernel faster. Prefer a "
+              f"direction the measurements show is faster, and when they agree strongly a bigger step is fine; avoid a "
+              f"direction they show is slower; if nothing is measured for any move, pick any. Reply in exactly this form:\n"
+              f"Set <M or N or K> to <value>. Reason: <one sentence>.")
+    reply = ""
+    for _ in range(2):
+        reply = ask(a, prompt, 70)
+        m = re.search(r"Set\s+([MNK])\s+to\s+(\d+)", reply)
+        hit = [o for o in options if m and o["knob"] == m.group(1) and o["value"] == int(m.group(2))]
+        if hit:
+            return hit[0]["text"].split(" -- ")[0] + ". " + reply.strip()[:200], hit[0]["knobs"]
+        prompt += "\n\nYour last reply did not name one of the listed moves. Copy one of them exactly."
+    return reply, None
+
+
+def apply_move(a, current, move, want, tries=3):
+    """Optimiser for checker v4: make the one-line edit, and have the edit CHECKED before chip time.
+
+    Found in the v3 log: told "Set K to 1" with the lines at M=2, N=24, K=2, the optimiser returned
+    M=4, N=24, K=1 -- it changed a line it was not asked to touch, which produced a setting already
+    tried, and it did the same on every retry of that attempt. An edit that does not match its
+    instruction is a checker failure like any other, and it is the cheapest one to catch: compare
+    before spending a compile. On a mismatch the optimiser is told exactly which line is wrong.
+    Returns (knobs or None, reply, number of edits rejected).
+    """
+    prompt = (f"These three lines set a kernel's block sizes:\n\n{knob_text(current)}\n\nInstruction: {move}\n"
+              f"Change only that one line. Reply with all three lines and nothing else.")
+    reply, got = "", None
+    for n in range(tries):
+        reply = ask(a, prompt, 60)
+        vals = [re.search(rf"{k}\s*=\s*(\d+)", reply) for k in KNOBS]
+        got = tuple(int(v.group(1)) for v in vals) if all(vals) else None
+        if got == tuple(want):
+            return got, reply, n
+        wrong = ("your reply did not contain the three lines" if got is None else
+                 "; ".join(f"{k} should be {w} but you wrote {g}" for k, w, g in zip(KNOBS, want, got) if w != g))
+        prompt = (f"These three lines set a kernel's block sizes:\n\n{knob_text(current)}\n\nInstruction: {move}\n"
+                  f"Your last edit was rejected: {wrong}. Change only the one line the instruction names. "
+                  f"Reply with all three lines and nothing else.")
+    return None, reply, tries
+
+
 def optimiser(a, card, current, instruction=None, hist=None):
     """The optimiser agent: rewrites the three lines. Sees the instruction, or the raw history."""
     parts = [card, "\nYou are the OPTIMISER. The three lines are currently:\n\n" + knob_text(current)]
@@ -253,13 +385,41 @@ def run_once(a, bench, arm, run_id, log, start=(1, 1, 1)):
         instruction, reply = "", ""
         if arm == "random":
             knobs = pool.pop()
+        elif arm in ("greedy", "greedy5"):
+            _, options = menu(hist, bench.legal(), far=(arm == "greedy5"))
+            if not options:
+                knobs = pool.pop()
+            else:
+                def score(o):
+                    m = re.search(r"faster (\d+) of (\d+) times, slower (\d+)", o["text"])
+                    return (int(m.group(1)) - int(m.group(3))) if m else 0
+                top = max(score(o) for o in options)
+                pick = rng.choice([o for o in options if score(o) == top])
+                knobs, instruction = pick["knobs"], pick["text"]
         else:
             if arm == "raw":
                 knobs, reply = optimiser(a, card, best["knobs"], hist=hist)
+            elif arm in ("checker4", "checker5"):
+                instruction, want = (checker3_instruction if arm == "checker4" else checker5_instruction)(
+                    a, hist, card, bench.legal())
+                if want:
+                    knobs, reply, rejected = apply_move(a, best["knobs"], instruction.split(". ")[0] + ".", want)
+                    if knobs is None:
+                        emit(attempt, None, "misapplied", instruction=instruction, reply=reply)
+                        continue
+                    if rejected:
+                        instruction += f" [optimiser edit rejected {rejected}x before it matched]"
+                else:
+                    knobs = None
+            elif arm == "checker3":
+                instruction, want = checker3_instruction(a, hist, card, bench.legal())
+                knobs, reply = (optimiser(a, card, best["knobs"], instruction=dict(text=instruction.split(". ")[0] + ".", hist=hist))
+                                if want else (None, ""))
             else:
                 instruction = (checker_instruction(a, hist, card) if arm == "checker" else
                                checker2_instruction(a, hist, card, bench.legal()) if arm == "checker2" else
                                template_instruction(hist))
+            if arm not in ("raw", "checker3", "checker4", "checker5"):
                 knobs, reply = optimiser(a, card, best["knobs"], instruction=dict(text=instruction, hist=hist))
         if knobs is None:
             emit(attempt, None, "unreadable", instruction=instruction, reply=reply)
@@ -277,7 +437,7 @@ def run_once(a, bench, arm, run_id, log, start=(1, 1, 1)):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--arm", required=True, choices=("random", "raw", "template", "checker", "checker2"))
+    ap.add_argument("--arm", required=True, choices=("random", "raw", "template", "checker", "checker2", "checker3", "checker4", "checker5", "greedy", "greedy5"))
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--attempts", type=int, default=10, help="chip attempts per run, after the starting point")
     ap.add_argument("--size", default="2048", help="2048 for square, or K4096_M512_N12288")
