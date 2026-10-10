@@ -449,6 +449,8 @@ def main():
     ap.add_argument("--no-live", action="store_true", help="fail instead of measuring a setting missing from the cache")
     ap.add_argument("--starts", default="worst", choices=("worst", "spread", "unblocked"),
                     help="worst: run i starts from the i-th slowest measured setting; unblocked: always 1,1,1")
+    ap.add_argument("--nstarts", type=int, default=0, help="number of distinct starts (default: one per run)")
+    ap.add_argument("--first-run", type=int, default=0, help="run ids to skip, to split one experiment over servers")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(os.path.join(HERE, "results"), exist_ok=True)
@@ -458,15 +460,16 @@ def main():
     # 1,1,1 matched for seven attempts), so repeats from one start are not independent. Runs differ
     # by where they START instead: the slowest settings on the grid.
     slow = sorted((r for r in bench.cache.values() if r.get("time_us")), key=lambda r: -r["time_us"])
+    n = a.nstarts or a.runs      # more runs than starts: the starts are cycled (for the no-model arms)
     if a.starts == "worst":
-        starts = [tuple(r["knobs"]) for r in slow[:a.runs]]
+        starts = [tuple(r["knobs"]) for r in slow[:n]]
     elif a.starts == "spread":   # evenly through the slowest 90% of the grid, by rank
-        starts = [tuple(slow[int(i * (len(slow) - 1) * 0.9 / max(a.runs - 1, 1))]["knobs"]) for i in range(a.runs)]
+        starts = [tuple(slow[int(i * (len(slow) - 1) * 0.9 / max(n - 1, 1))]["knobs"]) for i in range(n)]
     else:
         starts = [(1, 1, 1)]
     finals = []
     with open(a.out, "a") as log:
-        for run_id in range(a.runs):
+        for run_id in range(a.first_run, a.runs):
             best = run_once(a, bench, a.arm, run_id, log, start=starts[run_id % len(starts)])
             finals.append(best["rec"]["time_us"])
             print(f"{a.arm} run {run_id}: best {best['rec']['time_us']:.1f} us at M,N,K={best['knobs']}", flush=True)

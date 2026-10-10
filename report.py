@@ -83,11 +83,12 @@ def main():
         return
     fig, ax = plt.subplots(figsize=(9, 5), dpi=150)
     colours = dict(random="#8a8f98", raw="#d97706", template="#b45309", checker="#dc2626", checker2="#7c3aed",
-                   checker3="#2563eb", checker4="#059669", greedy="#111827")
+                   checker3="#2563eb", checker4="#059669", checker5="#0891b2", greedy="#111827", greedy5="#6b7280")
     names = dict(random="random choice (no model)", raw="optimiser on raw profile", template="optimiser + fixed sentence",
                  checker="checker v1: raw profile -> model", checker2="checker v2: measured comparisons -> model",
                  checker3="checker v3: model picks from a measured menu", checker4="checker v4: v3 + edit verified",
-                 greedy="menu + fixed rule (no model)")
+                 checker5="checker v5: v4 + far moves, names its move", greedy="menu + fixed rule (no model)",
+                 greedy5="v5 menu + fixed rule (no model)")
     for arm, rr in sorted(arms.items()):
         n = max(len(rs) for rs in rr)
         med = []
@@ -95,7 +96,7 @@ def main():
             vals = [rs[min(i, len(rs) - 1)]["best_time_us_so_far"] for rs in rr]
             med.append(statistics.median(vals))
         ax.plot(range(n), med, marker="o", ms=3.5, lw=2, color=colours.get(arm), label=f"{names.get(arm, arm)} (median of {len(rr)} runs)",
-                ls="--" if arm in ("random", "greedy") else "-")
+                ls="--" if arm in ("random", "greedy", "greedy5") else "-")
     ax.axhline(optimum, color="#111827", lw=1, ls="--")
     ax.text(0.1, optimum, f" best setting on the grid: {optimum:.0f} µs", va="bottom", fontsize=8)
     ax.set_xlabel("attempts measured on the chip")
