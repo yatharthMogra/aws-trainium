@@ -232,7 +232,7 @@ def main():
     ap.add_argument("--base", default=os.environ.get("KOPT_BASE_URL", os.environ.get("KERNEL_AGENT_BASE_URL", "")))
     ap.add_argument("--cache", help="measurement cache (default results/grid_<size>.jsonl)")
     ap.add_argument("--no-live", action="store_true", help="fail instead of measuring a setting missing from the cache")
-    ap.add_argument("--starts", default="worst", choices=("worst", "unblocked"),
+    ap.add_argument("--starts", default="worst", choices=("worst", "spread", "unblocked"),
                     help="worst: run i starts from the i-th slowest measured setting; unblocked: always 1,1,1")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -243,7 +243,12 @@ def main():
     # 1,1,1 matched for seven attempts), so repeats from one start are not independent. Runs differ
     # by where they START instead: the slowest settings on the grid.
     slow = sorted((r for r in bench.cache.values() if r.get("time_us")), key=lambda r: -r["time_us"])
-    starts = [tuple(r["knobs"]) for r in slow[:a.runs]] if a.starts == "worst" else [(1, 1, 1)]
+    if a.starts == "worst":
+        starts = [tuple(r["knobs"]) for r in slow[:a.runs]]
+    elif a.starts == "spread":   # evenly through the slowest 90% of the grid, by rank
+        starts = [tuple(slow[int(i * (len(slow) - 1) * 0.9 / max(a.runs - 1, 1))]["knobs"]) for i in range(a.runs)]
+    else:
+        starts = [(1, 1, 1)]
     finals = []
     with open(a.out, "a") as log:
         for run_id in range(a.runs):

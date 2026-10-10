@@ -1,0 +1,161 @@
+{
+ "size": "2048",
+ "grid_best_us": 904.742753,
+ "bar_us": 922.83760806,
+ "arms": {
+  "checker": {
+   "runs": 10,
+   "start_us": 1209.346444,
+   "final_median_us": 905.3365019999999,
+   "final_min_us": 905.0727519999999,
+   "final_max_us": 947.748519,
+   "beat_start": 10,
+   "within_2pct": 9,
+   "median_attempts_to_2pct": 2,
+   "median_after_3_attempts_us": 916.0777360000001,
+   "rejected": {
+    "compile": 5,
+    "duplicate": 35
+   },
+   "finals_us": [
+    906.2,
+    905.2,
+    906.2,
+    905.2,
+    905.2,
+    947.7,
+    905.2,
+    905.1,
+    906.6,
+    905.5
+   ],
+   "attempts_to_2pct": [
+    2,
+    7,
+    2,
+    2,
+    2,
+    null,
+    3,
+    1,
+    4,
+    2
+   ]
+  },
+  "random": {
+   "runs": 10,
+   "start_us": 1209.346444,
+   "final_median_us": 906.8102495,
+   "final_min_us": 904.8319190000001,
+   "final_max_us": 911.677742,
+   "beat_start": 10,
+   "within_2pct": 10,
+   "median_attempts_to_2pct": 2.0,
+   "median_after_3_attempts_us": 913.7435725,
+   "rejected": {
+    "compile": 2
+   },
+   "finals_us": [
+    904.8,
+    906.6,
+    906.2,
+    909.7,
+    904.8,
+    905.5,
+    909.7,
+    911.7,
+    911.2,
+    907.0
+   ],
+   "attempts_to_2pct": [
+    2,
+    3,
+    2,
+    4,
+    2,
+    1,
+    2,
+    1,
+    1,
+    2
+   ]
+  },
+  "raw": {
+   "runs": 10,
+   "start_us": 1209.346444,
+   "final_median_us": 905.1677520000001,
+   "final_min_us": 904.742753,
+   "final_max_us": 938.816866,
+   "beat_start": 10,
+   "within_2pct": 9,
+   "median_attempts_to_2pct": 1,
+   "median_after_3_attempts_us": 905.1677520000001,
+   "rejected": {
+    "duplicate": 50,
+    "compile": 7
+   },
+   "finals_us": [
+    913.5,
+    904.7,
+    912.4,
+    905.2,
+    904.7,
+    905.2,
+    905.2,
+    905.2,
+    904.8,
+    938.8
+   ],
+   "attempts_to_2pct": [
+    2,
+    1,
+    1,
+    1,
+    2,
+    1,
+    2,
+    1,
+    1,
+    null
+   ]
+  },
+  "template": {
+   "runs": 10,
+   "start_us": 1209.346444,
+   "final_median_us": 905.1760850000001,
+   "final_min_us": 904.742753,
+   "final_max_us": 938.816866,
+   "beat_start": 10,
+   "within_2pct": 9,
+   "median_attempts_to_2pct": 1,
+   "median_after_3_attempts_us": 905.1760850000001,
+   "rejected": {
+    "duplicate": 65
+   },
+   "finals_us": [
+    906.0,
+    905.2,
+    905.1,
+    912.4,
+    904.7,
+    905.2,
+    905.2,
+    905.2,
+    906.5,
+    938.8
+   ],
+   "attempts_to_2pct": [
+    2,
+    1,
+    1,
+    1,
+    2,
+    1,
+    2,
+    1,
+    1,
+    null
+   ]
+  }
+ }
+}
