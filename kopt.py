@@ -15,6 +15,8 @@ Arms, so the result is a comparison and not an anecdote:
   raw        optimiser only, shown the raw profile numbers of every attempt so far
   template   optimiser + a fixed code-written sentence built from the profile (no checker model)
   checker    optimiser + the checker model's instruction
+  checker2   as checker, but the checker model is shown measured single-change comparisons and the
+             legal values instead of raw profile lines (built after v1 lost to random; see evidence_text)
 
     python kopt.py --arm checker --runs 10 --attempts 10 --out runs/checker.jsonl
 
@@ -159,6 +161,57 @@ def checker_instruction(a, hist, card):
     return ask(a, prompt, 120)
 
 
+def evidence_text(hist, legal):
+    """What the measurements say, worked out in code so the checker cannot argue past it.
+
+    Written after checker v1 lost to random choice at the adapter shape. Its log showed the model
+    repeating "increase N, fewer transfers" for ten attempts while every N it raised got slower: it
+    was given the numbers and reasoned from a rule of thumb instead. So v2 is handed the comparison
+    already made -- for each pair of attempts that differ in ONE setting, which way the time went --
+    plus the legal values, because v1 also kept proposing 16 and 18 for a setting that must divide 24.
+    It still says only what was measured. It never names a setting that has not been tried.
+    """
+    timed = [h for h in hist if h["rec"].get("time_us")]
+    best = min(timed, key=lambda h: h["rec"]["time_us"])
+    names = ("M", "N", "K")
+    lines = []
+    for j, name in enumerate(names):
+        for a_ in timed:
+            for b_ in timed:
+                ka, kb = a_["knobs"], b_["knobs"]
+                if ka[j] < kb[j] and all(ka[i] == kb[i] for i in range(3) if i != j):
+                    ta, tb = a_["rec"]["time_us"], b_["rec"]["time_us"]
+                    rest = ", ".join(f"{names[i]}={ka[i]}" for i in range(3) if i != j)
+                    verdict = (f"{tb / ta:.2f}x SLOWER" if tb > ta * 1.01 else
+                               f"{ta / tb:.2f}x faster" if ta > tb * 1.01 else "no real change")
+                    lines.append((abs(tb / ta - 1), f"raising {name} from {ka[j]} to {kb[j]} (with {rest}): "
+                                                    f"{ta:.0f} -> {tb:.0f} microseconds, {verdict}"))
+    lines = [t for _, t in sorted(lines, reverse=True)[:8]]
+    failed = [h for h in hist if not h["rec"].get("time_us")]
+    out = [f"Best so far: M={best['knobs'][0]} N={best['knobs'][1]} K={best['knobs'][2]} at {best['rec']['time_us']:.0f} microseconds "
+           f"(compute engine busy {100 * best['rec']['te_busy']:.0f}%)."]
+    out.append("Measured effect of single changes so far:\n" + ("\n".join("- " + l for l in lines) if lines else
+               "- none yet: no two attempts differ in exactly one setting"))
+    if failed:
+        out.append("Did not compile: " + "; ".join(f"M={h['knobs'][0]} N={h['knobs'][1]} K={h['knobs'][2]}" for h in failed[-4:]))
+    out.append("Legal values -- M: " + " ".join(map(str, sorted({k[0] for k in legal}))) +
+               " | N: " + " ".join(map(str, sorted({k[1] for k in legal}))) +
+               " | K: " + " ".join(map(str, sorted({k[2] for k in legal}))))
+    out.append("Already tried (M,N,K): " + " ".join(f"({h['knobs'][0]},{h['knobs'][1]},{h['knobs'][2]})" for h in hist))
+    return "\n".join(out)
+
+
+def checker2_instruction(a, hist, card, legal):
+    """Checker v2: same model, but it is shown the measured comparisons instead of raw profiles."""
+    prompt = (f"{card}\n\nYou are the CHECKER. You do not write code. You decide the next change from measurements "
+              f"taken on the real chip.\n\n{evidence_text(hist, legal)}\n\nTrust the measured lines over any general "
+              f"rule: if raising a setting made the kernel slower, lower it, and the other way round. Change ONE "
+              f"setting of the best-so-far, to a legal value, so that the result is not in the already-tried list. "
+              f"Reply in this form and nothing else:\nSet <M or N or K> to <value>. Reason: <one sentence citing a measured line, "
+              f"or saying no measurement exists yet>.")
+    return ask(a, prompt, 90)
+
+
 def optimiser(a, card, current, instruction=None, hist=None):
     """The optimiser agent: rewrites the three lines. Sees the instruction, or the raw history."""
     parts = [card, "\nYou are the OPTIMISER. The three lines are currently:\n\n" + knob_text(current)]
@@ -204,7 +257,9 @@ def run_once(a, bench, arm, run_id, log, start=(1, 1, 1)):
             if arm == "raw":
                 knobs, reply = optimiser(a, card, best["knobs"], hist=hist)
             else:
-                instruction = (checker_instruction(a, hist, card) if arm == "checker" else template_instruction(hist))
+                instruction = (checker_instruction(a, hist, card) if arm == "checker" else
+                               checker2_instruction(a, hist, card, bench.legal()) if arm == "checker2" else
+                               template_instruction(hist))
                 knobs, reply = optimiser(a, card, best["knobs"], instruction=dict(text=instruction, hist=hist))
         if knobs is None:
             emit(attempt, None, "unreadable", instruction=instruction, reply=reply)
@@ -222,7 +277,7 @@ def run_once(a, bench, arm, run_id, log, start=(1, 1, 1)):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--arm", required=True, choices=("random", "raw", "template", "checker"))
+    ap.add_argument("--arm", required=True, choices=("random", "raw", "template", "checker", "checker2"))
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--attempts", type=int, default=10, help="chip attempts per run, after the starting point")
     ap.add_argument("--size", default="2048", help="2048 for square, or K4096_M512_N12288")
