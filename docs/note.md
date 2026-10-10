@@ -148,7 +148,7 @@ no-model arms. "Within 2%" means 922.8 µs or faster. Source: `results/summary_2
 | Checker v4 | 10 | 907.0 | 907.0 | 10 of 10 |
 | Checker v5 | 10 | 907.0 | 907.0 | 10 of 10 |
 
-Every arm reaches the best on the median. v4 and v5 are the only model arms with no bad run. The
+Every arm's median is within 1% of the best. v4 and v5 are the only model arms with no bad run. The
 raw and fixed-sentence arms made the same first move in all 10 runs, so they are not independent
 confirmations of each other.
 
