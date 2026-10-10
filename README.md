@@ -82,7 +82,15 @@ inference (median wall clock of 50 calls). For two feed-forward blocks at Qwen3-
 32-bit: 20.12 ms with the unblocked kernel, 17.40 ms with the settings the loop chose per layer (13.5%
 less), 17.26 ms with PyTorch's own matmul. At 16-bit the spread between settings is 3.3x (16.53 ms to
 5.02 ms, PyTorch 4.77 ms) and the 32-bit settings are 1.7x off the best; those 16-bit settings were
-found by hand, not by the loop. These are small models with random weights, not Qwen3-8B itself.
+found by hand.
+
+The loop was then run at 16-bit itself, scored on the inference time of one such block
+(`inference/kopt16.py`, the same loop code with only the measurement replaced). All 72 settings were
+measured for ground truth: best 2,860 µs, worst 8,635 µs. Five runs from five different starts, as slow
+as 8,628 µs, all ended between 2,862 and 2,894 µs, within 2% of the best and 4% to 5% behind plain
+PyTorch (2,745 µs). Random choice also ends within 2% of the best in 166 of 200 runs on this problem,
+so this shows the loop working on real inference time, not the model beating random. These are small
+models with random weights, not Qwen3-8B itself.
 
 ## Files
 
