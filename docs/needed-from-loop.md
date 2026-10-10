@@ -21,3 +21,4 @@ settings and log stages are already agreed and written into the note.
 
 6. Which pitch opening the results support: A (speed-up, random matches it), B (checker clearly ahead) or C (no speed-up).
 7. **Per-layer table** (note section 5.5): measured results for the three unmeasured rows, and how many of the five shapes the loop tuned.
+8. **Model-level figures** (note section 5.6): the sum over 252 projections before and after, and the compiler-default matmul time with its shape, or the exact failure if the compile does not work.
