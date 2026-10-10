@@ -4,3 +4,6 @@ __pycache__/
 *.ntff
 .DS_Store
 .claude/
+slides/node_modules/
+slides/package-lock.json
+slides/qa/
