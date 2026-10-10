@@ -1,40 +1,53 @@
-# Hand-in note: small models that speed up a kernel on the chip
+# Hand-in note: small models that tune a kernel on the chip
 
 Hack the Chip, NYU × Annapurna Labs. Track: kernel optimisation. Seats 205–209.
 
-> Status: sections 1–4 are measured. Section 5 (the agent loop) has not run yet; every `TBD` is a
+> Status: sections 1–4 are measured. Section 5 (the agent loop) is running; every `TBD` is a
 > placeholder, not a result.
 
 ## 1. What we built
 
-A loop of three roles, as the mentor specified. Both models are Qwen3-8B (8B parameters); no larger
+A loop of three roles, as the mentor specified. Both agents are Qwen3-8B (8B parameters); no larger
 model is in the automated loop. Claude was used to write the harness only.
 
 | Role | What it is | Where it runs |
 |---|---|---|
-| Workload | An NKI matmul kernel, K=M=N=2048, float32 | Trainium2 chip, seats 206–209 |
-| Checker | Code that measures the kernel on the chip, then Qwen3-8B turns the profile into one instruction | Measurement on the kernel's seat; model on seat 205 |
-| Optimiser | Qwen3-8B edits the kernel source following that instruction | Seat 205 |
+| Workload | AWS's blocked tutorial matmul kernel, 2048 × 2048, float32, with three block-size settings | Trainium2 chip, seats 206–209 |
+| Checker | Code measures the kernel on the chip; Qwen3-8B reads that profile and writes one instruction | Measurement on the kernel's seat; model on seat 205 |
+| Optimiser | Qwen3-8B reads the instruction and picks new values for the three settings | Seat 205 |
+
+**This is settings tuning, not free-form code editing.** The optimiser outputs three numbers
+(`TILES_IN_BLOCK_M`, `_N`, `_K`) and code writes them into the kernel. The kernel's structure is
+AWS's and does not change. At size 2048 there are 75 legal settings.
 
 The model server takes the whole chip, so the model and the kernels run on separate seats.
 
 ## 2. The checker and its reasoning
 
-A kernel is rejected at the first stage it fails. Only a kernel that is correct on the chip gets a
-speed score, so fast and wrong scores zero.
+Every attempt is compiled, run on a real NeuronCore and profiled. Nothing is scored on the
+simulator. An attempt stops at the first stage it fails, and only an attempt that is correct on the
+chip gets a time.
 
-| Stage | Accepts | Rejects | Why |
-|---|---|---|---|
-| Rules scan (`nkibench.py`) | Source that does the work in NKI | Host-side shortcuts (`@`, `.T`, `np.mean`), tiles over 128 partitions, missing `@nki.jit`, wrong entry-point name | Otherwise the "kernel" hands the operation to NumPy and passes |
-| Numerics on the chip | Output within 2e-2 of the NumPy reference | Any mismatch, reported with the element that differs | A wrong kernel does not crash; it returns plausible numbers |
-| Input mutation | Inputs unchanged after the call | A kernel that writes into its input | It passes a standalone test by luck and corrupts the caller's buffer in a real graph |
-| On-chip profile (`hwcheck.py`) | n/a (this stage scores, it does not reject) | n/a | Gives time on chip, tensor-engine busy, data-movement busy, bytes and transfer count |
-| Instruction (Qwen3-8B) | n/a | n/a | Turns the profile into one named change for the optimiser; raw numbers alone are the control arm |
+| Stage in the log | What it means | Why it is there |
+|---|---|---|
+| `unreadable` | The optimiser's reply did not contain three usable settings | A small model does not always answer in the format asked |
+| `duplicate` | The setting was already tried in this run | A repeat teaches nothing and wastes an attempt |
+| `compile` | The kernel did not compile, most often because the blocks need more on-chip buffer than the chip has | The feedback is shortened to the one reason a model can act on |
+| `numerics` | Output differs from the NumPy reference by more than 2e-2 | A wrong kernel does not crash; it returns plausible numbers |
+| `timed` | Correct on the chip; median time of three profile captures, plus engine busy, bytes and transfers | This is the score |
+
+After a timed attempt, the checker model sees one line of raw numbers (time, compute engine busy,
+data movement busy, bytes moved against the minimum, transfer count, average transfer size) and
+writes one instruction. Its prompt and the optimiser's are each under 1,500 characters.
 
 All chip measurements are at LNC=1 (one physical core). At the pod's default LNC=2 the kernel runs
 on both physical cores and every count doubles; our first profile was wrong for this reason.
 
-## 3. Headroom: is there anything for an agent to win?
+`hwcheck.py` is the same on-chip measurement packaged for the hackathon's own ladder. It adds the
+`nkibench.py` rules scan (no host-side `@`, `.T` or `np.mean`; tiles within 128 partitions) and a
+check that the kernel did not write into its inputs.
+
+## 3. Headroom: is there anything to win on the chip?
 
 Measured before building the loop. AWS's four tutorial matmul versions, K=M=N=2048, float32, real
 chip (seat 206), three captures each, all correct. Time is the median.
@@ -48,7 +61,6 @@ chip (seat 206), three captures each, all correct. Time is the median.
 
 - Naive to best is 1.39x faster with 4.75x fewer bytes. The minimum possible traffic is 50,331,648 bytes.
 - Run-to-run spread is under 1% (naive: 1254.6 to 1265.7 µs).
-- These four kernels are the yardstick only. The models are never shown them.
 
 Raw data: `results/tutorial_matmul_sweep_2048.json`. Script: `sweep_tutorial.py`.
 
@@ -73,23 +85,40 @@ hardware at toy sizes.
 - The README says two cores stay free beside the model server; the runtime reports "cores busy".
 - The AWS toolkit's profiling recipe needs `torch_neuronx`, which the pod lacks. NKI standalone mode with NumPy inputs works instead.
 
+**How this differs from AWS's own recommendation tool.** `neuron-explorer recommend` exists on the
+pod. In print-only mode on our kernel's profile, its banner says "AWS Bedrock-powered", its prompt
+is 155,604 characters (it includes the whole NKI performance guide), and it asks for two or three
+written recommendations with the instruction "Please do not give code or pseudocode". That is a
+hosted large model advising a person. Ours is an 8B model with a prompt under 1,500 characters that
+changes the kernel and measures again. We did not run theirs end to end, because it needs a Bedrock
+call.
+
 ## 5. The agent loop: results
 
-Start: the naive tiled kernel (1258.6 µs). Each arm gets the same starting kernel, the same number
-of attempts and the same optimiser model. Only the feedback differs.
+**Start:** the blocked kernel with all three settings at 1, about 1,209 µs (1,207.5 and 1,209.3 in
+two measurements). **Yardstick:** the best setting in the full grid of 75, about 905 µs
+(`TBD final`), which is 1.34x faster (`TBD final`).
 
-| Arm | Feedback the optimiser sees | Runs | Runs ending faster than start | Median final time (µs) | Range (µs) | Median speed-up | Gap closed |
-|---|---|---|---|---|---|---|---|
-| Random choice | none; a random named change | TBD | TBD | TBD | TBD | TBD | TBD |
-| Raw profile | the profile numbers as measured | TBD | TBD | TBD | TBD | TBD | TBD |
-| Checker's instruction | one named change from the checker model | TBD | TBD | TBD | TBD | TBD | TBD |
+Every arm starts from the same setting and gets 10 attempts per run. 10 runs per arm are planned.
 
-"Gap closed" is (1258.6 − final) / (1258.6 − 905.8), so 0% is the naive kernel and 100% matches the
-AWS fully optimised one. Differences under 1% are noise.
+| Arm | What chooses the next setting |
+|---|---|
+| Random | No model: an untried legal setting drawn uniformly |
+| Raw profile | Optimiser model, shown the raw profile line of every attempt so far |
+| Template | Optimiser model plus a fixed, code-written sentence built from the profile |
+| Checker | Optimiser model plus the checker model's instruction |
 
-- Attempts per run: TBD. Temperature and seed policy: TBD.
-- Attempts rejected, by checker stage: TBD.
-- Full attempt log, every attempt with its score: `TBD path`.
+| Arm | Runs | Median final time (µs) | Range (µs) | Median speed-up | Runs within 2% of grid best | Median attempts to get within 2% | Median time after 3 attempts (µs) | Attempts lost to compile failures |
+|---|---|---|---|---|---|---|---|---|
+| Random | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Raw profile | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Template | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Checker | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+- **What to expect at this size.** In a partial grid (26 of 75 settings), about a third of settings were within 2% of the best. If that holds for the full grid (`TBD`), random choice will also land near the best within a few attempts, and the arms may not separate on final time. We report that as it comes out.
+- **Second shape, 4096 × 4096:** `TBD`. The space is larger and more settings overflow the on-chip buffer, so it is the better test of whether the checker's instruction matters.
+- **Settings:** Qwen3-8B for both agents, temperature 0.6, top_p 0.95, thinking off, 8,192-token server context. Chip measurements are cached per setting (three captures, median).
+- **Attempt logs,** every attempt with its stage and score: `runs/<arm>.jsonl`. Grid: `results/grid_2048.jsonl`. Summary and chart: `results/summary.json`, `results/curve.csv`, `results/curve.png`.
 
 ## 6. Which numbers are which
 
@@ -102,6 +131,7 @@ AWS fully optimised one. Differences under 1% are noise.
 
 ## 7. What we do not claim
 
-- We do not beat AWS's engineers; their fully optimised kernel is our ceiling.
-- One operation, one shape, one dtype. Nothing here shows the loop transfers to other kernels.
-- The tutorial kernels are public, so Qwen3-8B may have seen them in training. The comparison between arms is still fair, because all three arms use the same model.
+- We do not beat AWS's engineers. The kernel is theirs; the loop finds good settings for it.
+- The models do not write kernel code. They choose three numbers.
+- One operation and one dtype, at one shape so far (`TBD` if 4096 lands). Nothing here shows the loop transfers to other kernels.
+- The tutorial kernel is public, so Qwen3-8B may have seen its default settings in training. The comparison between arms is still fair, because every model arm uses the same model.
