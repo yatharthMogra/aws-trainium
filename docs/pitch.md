@@ -80,9 +80,9 @@ with the grid best as a dashed line.
 
 > "We measured all 75 settings. 39 of them are within 2% of the best, and AWS's own default is one
 > of those. So random search finds a good one in a few tries. The models matched it; they did not
-> beat it. Where they differ is **TBD** (attempts to get within 2%, result after three attempts,
-> attempts lost to compile failures). On our second shape, the feed-forward layer of the model
-> itself, **TBD**."
+> beat it. Where they differ is wasted attempts: without the checker, the optimiser re-proposed a
+> setting it had already tried in 50 to 65 of 100 attempts. With the checker's instruction,
+> **TBD** (5 of 50 so far). On the adapter shape, **TBD**."
 
 *If they do separate (opening B):* give the two numbers and the number of runs.
 
@@ -96,6 +96,17 @@ Either way, show the adapter-shape contrast (probe of 8 settings so far, full gr
 
 > "The rule that worked at one shape is wrong at the next. That is why this needs a loop that
 > measures, and not a table of good settings."
+
+## 2:25 — From a kernel to a model
+
+One slide: the per-layer table from `docs/note.md` section 5.5.
+
+> "A model is mostly matrix multiplies. Qwen3-8B's config gives five distinct shapes. At 512
+> tokens, AWS's default settings run on none of them. The loop tuned **TBD** of the five on the
+> chip."
+
+Say that the legality column is computed from the config, and that the model is not running on
+these kernels yet.
 
 ## 2:40 — The honest claim, and close
 
@@ -116,6 +127,7 @@ Either way, show the adapter-shape contrast (probe of 8 settings so far, full gr
 | Why do the runs start from different settings? | The served model answers the same prompt almost identically each time, so repeats from one start are not independent. Each run starts from a different one of the 10 slowest settings. |
 | How is this different from `neuron-explorer recommend`? | We ran it in print-only mode. It is Bedrock-powered, sends a 155,604-character prompt, and is told not to give code. It advises a person. Ours is an 8B model with a prompt of about 1,200 to 3,000 characters that changes the kernel and measures again. |
 | Do the models write the kernel? | No. They choose three block-size settings; code applies them. |
+| Did you make the model itself faster? | Not measured. We tuned standalone kernels at the model's layer shapes. Plugging them into the running model, and a tokens-per-second number, is the next step. |
 | Did the model just remember the AWS tutorial? | Possibly; the tutorial is public. Every model arm uses the same model, so differences between arms are not explained by memory. |
 | Is the checker a model or code? | Both. Code measures and rejects wrong kernels; an 8B model writes the instruction. The template arm shows what code alone does. |
 | How noisy are the timings? | Under 1% run to run on three captures. We treat anything smaller as no change. |

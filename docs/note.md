@@ -2,8 +2,8 @@
 
 Hack the Chip, NYU × Annapurna Labs. Track: kernel optimisation. Seats 205–209.
 
-> Status: sections 1–4 and the grid in section 5 are measured. The arm runs are in progress; every
-> `TBD` is a placeholder, not a result.
+> Status: sections 1–4 and the 2048 grid are measured. Arm results at 2048 are in for three arms
+> and partial for the checker arm. Every `TBD` is a placeholder, not a result.
 
 ## 1. What we built
 
@@ -129,12 +129,20 @@ setting in a few attempts at this shape.
 - **Why different starts.** Repeating a run from the same start is not independent: the served model answers the same prompt almost identically each time. Two checker runs from 1/1/1 matched for seven attempts.
 - **Settings:** Qwen3-8B for both agents, temperature 0.6, top_p 0.95, thinking off, 8,192-token server context. Chip measurements are cached per setting (three captures, median).
 
-| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of grid best | Median attempts to get within 2% | Median time after 3 attempts (µs) | Attempts lost to compile failures |
-|---|---|---|---|---|---|---|---|
-| Random | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Raw profile | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Template | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Checker | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of grid best | Attempts rejected as duplicates | Attempts rejected at compile |
+|---|---|---|---|---|---|---|
+| Random | 10 | 906.8 | 904.8 to 911.7 | 10 of 10 | 0 | 2 |
+| Raw profile | 10 | 905.2 | 904.7 to 938.8 | 9 of 10 | 50 | 7 |
+| Template | 10 | 905.2 | 904.7 to 938.8 | 9 of 10 | 65 | 0 |
+| Checker (partial: 5 of 10 runs) | 5 | 906.2 | 905.2 to 913.8 | 5 of 5 | 5 | 4 |
+
+Grid best is 904.7 µs, so "within 2%" means 922.8 µs or faster. Each run has 10 attempts, so 10 runs
+are 100 attempts. The checker row is not final.
+
+**Reading so far.**
+- **No arm is ahead on final time.** Every arm ends within about 0.2% of the others at the median, and random choice gets all 10 runs within 2% of the best. At this shape the speed-up does not come from the checker's guidance.
+- **One real difference is wasted attempts.** Without the checker model, the optimiser proposed a setting it had already tried in 50 to 65 of 100 attempts. With the checker's instruction it has done so in 5 of 50 so far.
+- Still to come: median attempts to get within 2%, and median time after 3 attempts (`TBD`).
 
 Attempt logs, every attempt with its stage and score: `runs/<arm>_2048_v2.jsonl`. Summary and
 chart: `results/summary.json`, `results/curve.csv`, `results/curve.png`.
@@ -187,7 +195,35 @@ Arm results at this shape: `TBD`.
 - *Qwen3-8B's feed-forward projection* (K=4096, M=512, N=12288): compute-limited whatever the settings. In a partial grid (about 20 of 144 settings), every setting that ran landed between 2,666 and 2,724 µs with the tensor engine 98–99% busy. AWS's default is illegal here too (M=512 is 4 tiles; it needs M divisible by 2048). Not used for the arms.
 - *Square 4096:* a three-setting probe gave 10,092.8 µs at 1/1/1 and 7,062.0 µs at 4/2/4, about 1.43x, but the full grid was too slow to finish in the day.
 
-### 5.5 What went wrong along the way
+### 5.5 From a kernel to a model
+
+A linear layer `y = x W` maps onto this kernel as K = input width, M = token count, N = output
+width. So a model's config gives the list of matmul shapes the loop would have to tune. For
+Qwen3-8B (hidden 4096, intermediate 12288, 32 heads and 8 key-value heads of width 128, 36 layers),
+at 512 tokens:
+
+| Layer | Shape (K / M / N) | Per layer × layers | Legal settings | AWS default 16/2/8 | Measured on the chip |
+|---|---|---|---|---|---|
+| Attention query and output projections | 4096 / 512 / 4096 | 2 × 36 | 72 | Illegal | `TBD` |
+| Attention key and value projections | 4096 / 512 / 1024 | 2 × 36 | 36 | Illegal | `TBD` |
+| Feed-forward gate and up projections | 4096 / 512 / 12288 | 2 × 36 | 144 | Illegal | Flat: 2,666 to 2,724 µs over about 20 settings (partial) |
+| Feed-forward down projection | 12288 / 512 / 4096 | 1 × 36 | 144 | Illegal | `TBD` |
+| Rank-256 adapter weight product | 256 / 4096 / 12288 | not in the base model | 96 | Illegal | 4.9x spread over 8 settings (probe) |
+
+The shape, settings-count and legality columns are **computed from the config and the kernel's own
+rules, not measured**. What they show: at 512 tokens, AWS's tutorial default runs on none of this
+model's linear layers, so every one needs its own settings.
+
+Limits of this table:
+- "Illegal" is specific to 512 tokens. The default needs M divisible by 2048, so it becomes legal for the base-model rows at 2048 tokens or a multiple.
+- The output head (151,936 wide) is not a multiple of 512, so this kernel cannot run it at all. It is excluded.
+- These are float32 standalone kernels at the model's shapes. The model itself is not running on them, so there is no tokens-per-second number.
+- The adapter row's M=4096 is a weight-product dimension, not a token count.
+
+Planned if chip time allows: one checker-loop run per row, so the claim becomes "the loop tuned
+every linear-layer matmul shape in Qwen3-8B". Status: `TBD`.
+
+### 5.6 What went wrong along the way
 
 - The first pass of arm runs was cut short when the model server died, and is not quoted in the results table. The cause was ours: a request that included a `seed` parameter. The server was restarted and the loop does not send one.
 
