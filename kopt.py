@@ -40,7 +40,7 @@ KNOBS = chip.KNOBS
 
 # What every model arm is told about the kernel. Deliberately says what each line DOES and not
 # what value is good: the direction has to come from the measurement.
-CARD = """The kernel multiplies two {size}x{size} matrices on an AI accelerator. It works in blocks. Three lines set the block sizes:
+CARD = """The kernel multiplies a {M}x{K} matrix by a {K}x{N} matrix on an AI accelerator. It works in blocks. Three lines set the block sizes:
 
 TILES_IN_BLOCK_M=<int>   how many 128-wide tiles of the left matrix are loaded per transfer
 TILES_IN_BLOCK_N=<int>   how many 512-wide tiles of the right matrix are loaded per transfer
@@ -53,7 +53,9 @@ Larger blocks mean fewer, bigger transfers and more reuse of data already on the
 
 class Bench:
     def __init__(self, size, cache_path, live=True):
-        self.size, self.live, self.cache_path, self.cache = size, live, cache_path, {}
+        self.shape = chip.parse_shape(size)
+        self.size, self.live, self.cache_path, self.cache = chip.shape_tag(self.shape), live, cache_path, {}
+        self.tiles = (self.shape[1] // 128, self.shape[2] // 512, self.shape[0] // 128)   # M, N, K
         self.base = open(os.path.join(HERE, "kernels", "matmul_blocked.py")).read()
         if os.path.exists(cache_path):
             for line in open(cache_path):
@@ -63,14 +65,14 @@ class Bench:
 
     def legal(self):
         d = lambda n: [v for v in range(1, n + 1) if n % v == 0]
-        return [(m, n, k) for m in d(self.size // 128) for n in d(self.size // 512) for k in d(self.size // 128)]
+        return [(m, n, k) for m in d(self.tiles[0]) for n in d(self.tiles[1]) for k in d(self.tiles[2])]
 
     def measure(self, knobs):
         knobs = tuple(knobs)
         if knobs not in self.cache:
             if not self.live:
                 raise KeyError(f"{knobs} is not in the cache and live measurement is off")
-            rec = chip.measure(chip.set_knobs(self.base, *knobs), self.size, reps=3)
+            rec = chip.measure(chip.set_knobs(self.base, *knobs), self.shape, reps=3)
             rec["knobs"] = list(knobs)
             self.cache[knobs] = rec
             open(self.cache_path, "a").write(json.dumps(rec) + "\n")
@@ -86,9 +88,10 @@ def stage_of(rec):
 def short_error(rec):
     """The part of a failure a model can act on. The compiler's message is long; keep its reason."""
     e = rec.get("error") or ""
-    if "State buffer allocation failed" in e or "exceeds state buffer capacity" in e:
+    if ("State buffer allocation failed" in e or "exceeds state buffer capacity" in e
+            or "Allocated memory out of bound" in e):
         return "FAILED TO COMPILE: the blocks need more on-chip buffer than the chip has."
-    m = re.search(r"AssertionError: (.*)", e)
+    m = re.search(r"assertion failed: (.*)", e) or re.search(r"AssertionError: (?!error)(.*)", e)
     if m:
         return f"FAILED TO COMPILE: {m.group(1)[:160]}"
     return ("FAILED: " + e.replace("\n", " "))[:220]
@@ -173,18 +176,17 @@ def optimiser(a, card, current, instruction=None, hist=None):
 
 # ---------------------------------------------------------------- one run
 
-def run_once(a, bench, arm, run_id, log):
+def run_once(a, bench, arm, run_id, log, start=(1, 1, 1)):
     rng = random.Random(a.seed * 1000 + run_id)
-    card = CARD.format(size=bench.size, m_tiles=bench.size // 128, n_tiles=bench.size // 512,
-                       k_tiles=bench.size // 128)
-    start = (1, 1, 1)
+    card = CARD.format(K=bench.shape[0], M=bench.shape[1], N=bench.shape[2], m_tiles=bench.tiles[0],
+                       n_tiles=bench.tiles[1], k_tiles=bench.tiles[2])
     hist = [dict(knobs=start, rec=bench.measure(start))]
     best = hist[0]
     pool = [k for k in bench.legal() if k != start]
     rng.shuffle(pool)
 
     def emit(attempt, knobs, stage, rec=None, instruction="", reply=""):
-        row = dict(arm=arm, run=run_id, attempt=attempt, knobs=list(knobs) if knobs else None,
+        row = dict(arm=arm, run=run_id, size=bench.size, start=list(start), attempt=attempt, knobs=list(knobs) if knobs else None,
                    stage_reached=stage, correct=bool(rec and rec.get("correct")),
                    time_us=rec.get("time_us") if rec else None, te_busy=rec.get("te_busy") if rec else None,
                    dma_busy=rec.get("dma_busy") if rec else None, bytes=rec.get("bytes") if rec else None,
@@ -223,22 +225,29 @@ def main():
     ap.add_argument("--arm", required=True, choices=("random", "raw", "template", "checker"))
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--attempts", type=int, default=10, help="chip attempts per run, after the starting point")
-    ap.add_argument("--size", type=int, default=2048)
+    ap.add_argument("--size", default="2048", help="2048 for square, or K4096_M512_N12288")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--temperature", type=float, default=0.6)
     ap.add_argument("--model", default=os.environ.get("KERNEL_AGENT_MODEL", "Qwen/Qwen3-8B"))
     ap.add_argument("--base", default=os.environ.get("KOPT_BASE_URL", os.environ.get("KERNEL_AGENT_BASE_URL", "")))
     ap.add_argument("--cache", help="measurement cache (default results/grid_<size>.jsonl)")
     ap.add_argument("--no-live", action="store_true", help="fail instead of measuring a setting missing from the cache")
+    ap.add_argument("--starts", default="worst", choices=("worst", "unblocked"),
+                    help="worst: run i starts from the i-th slowest measured setting; unblocked: always 1,1,1")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(os.path.join(HERE, "results"), exist_ok=True)
     bench = Bench(a.size, a.cache or os.path.join(HERE, "results", f"grid_{a.size}.jsonl"), live=not a.no_live)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    # Measured: the served model answers the same prompt almost identically each time (two runs from
+    # 1,1,1 matched for seven attempts), so repeats from one start are not independent. Runs differ
+    # by where they START instead: the slowest settings on the grid.
+    slow = sorted((r for r in bench.cache.values() if r.get("time_us")), key=lambda r: -r["time_us"])
+    starts = [tuple(r["knobs"]) for r in slow[:a.runs]] if a.starts == "worst" else [(1, 1, 1)]
     finals = []
     with open(a.out, "a") as log:
         for run_id in range(a.runs):
-            best = run_once(a, bench, a.arm, run_id, log)
+            best = run_once(a, bench, a.arm, run_id, log, start=starts[run_id % len(starts)])
             finals.append(best["rec"]["time_us"])
             print(f"{a.arm} run {run_id}: best {best['rec']['time_us']:.1f} us at M,N,K={best['knobs']}", flush=True)
     finals.sort()

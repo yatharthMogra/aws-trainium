@@ -40,6 +40,19 @@ def set_knobs(src, m, n, k):
     return src
 
 
+def parse_shape(text):
+    """'2048' -> (2048, 2048, 2048); 'K4096_M512_N12288' -> (4096, 512, 12288)."""
+    if str(text).isdigit():
+        return (int(text),) * 3
+    d = dict((p[0], int(p[1:])) for p in str(text).split("_"))
+    return (d["K"], d["M"], d["N"])
+
+
+def shape_tag(shape):
+    k, m, n = shape
+    return str(k) if k == m == n else f"K{k}_M{m}_N{n}"
+
+
 def _worker(job_path):
     job = pickle.load(open(job_path, "rb"))
     os.environ.update(NEURON_RT_VISIBLE_CORES=str(job["core"]), NEURON_PLATFORM_TARGET_OVERRIDE="trn2",
@@ -51,10 +64,10 @@ def _worker(job_path):
         spec = importlib.util.spec_from_file_location("candidate", job["kernel"])
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        size = job["size"]
+        K, M, N = job["shape"]
         r = np.random.default_rng(0)
-        lhsT = r.standard_normal((size, size)).astype(np.float32)
-        rhs = r.standard_normal((size, size)).astype(np.float32)
+        lhsT = r.standard_normal((K, M)).astype(np.float32)
+        rhs = r.standard_normal((K, N)).astype(np.float32)
         want = lhsT.T @ rhs
         got = np.asarray(getattr(mod, ENTRY)(lhsT, rhs))
         out["correct"] = bool(got.shape == want.shape and np.allclose(got, want, rtol=2e-2, atol=2e-2))
@@ -67,6 +80,8 @@ def _worker(job_path):
 
 
 def measure(source, size=2048, reps=3, core=0, keep=None):
+    shape = size if isinstance(size, tuple) else (size,) * 3
+    K, M, N = shape
     """Compile, run, verify and profile one kernel source. Returns a dict; never raises."""
     import hwcheck
     os.environ["NEURON_LOGICAL_NC_CONFIG"] = "1"   # at the pod's LNC=2 every count comes back doubled
@@ -75,12 +90,12 @@ def measure(source, size=2048, reps=3, core=0, keep=None):
     os.makedirs(os.path.join(work, "art"))
     kpath = os.path.join(work, "kernel.py")
     open(kpath, "w").write(source)
-    job = dict(kernel=kpath, size=size, core=core, art=os.path.join(work, "art"),
+    job = dict(kernel=kpath, shape=shape, core=core, art=os.path.join(work, "art"),
                result=os.path.join(work, "result.pkl"))
     jpath = os.path.join(work, "job.pkl")
     pickle.dump(job, open(jpath, "wb"))
     t0 = time.time()
-    rec = dict(size=size, correct=False, error=None)
+    rec = dict(size=shape_tag(shape), correct=False, error=None)
     try:
         run = subprocess.run([sys.executable, os.path.abspath(__file__), "--_worker", jpath],
                              capture_output=True, text=True, timeout=1200)
@@ -105,7 +120,7 @@ def measure(source, size=2048, reps=3, core=0, keep=None):
                        dma_busy=m["dma_active_time_percent"],
                        bytes=m["dma_transfer_total_bytes"], transfers=m["dma_transfer_count"],
                        avg_transfer_bytes=m.get("dma_transfer_average_bytes"),
-                       floor_bytes=3 * size * size * 4,
+                       floor_bytes=(K * M + K * N + M * N) * 4,
                        compute_util=m.get("mfu_estimated_percent"),
                        bandwidth_util=m.get("mbu_estimated_percent"))
         except Exception as e:
@@ -119,7 +134,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--_worker")
     ap.add_argument("--kernel", default=os.path.join(HERE, "kernels", "matmul_blocked.py"))
-    ap.add_argument("--size", type=int, default=2048)
+    ap.add_argument("--size", default="2048", help="2048 for square, or K4096_M512_N12288")
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--grid", help='knob settings "M,N,K;M,N,K;..." applied to --kernel')
     ap.add_argument("--out", help="append one JSON line per measurement")
@@ -129,7 +144,7 @@ def main():
     base = open(a.kernel).read()
     todo = [tuple(int(x) for x in c.split(",")) for c in a.grid.split(";")] if a.grid else [get_knobs(base)]
     for knobs in todo:
-        rec = measure(set_knobs(base, *knobs), a.size, a.reps)
+        rec = measure(set_knobs(base, *knobs), parse_shape(a.size), a.reps)
         rec["knobs"] = list(knobs)
         line = json.dumps(rec)
         print(line, flush=True)
