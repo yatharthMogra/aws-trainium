@@ -13,6 +13,7 @@
    "within_2pct": 9,
    "median_attempts_to_2pct": 2,
    "median_after_3_attempts_us": 916.0777360000001,
+   "within_10pct": 10,
    "rejected": {
     "compile": 5,
     "duplicate": 35
@@ -52,6 +53,7 @@
    "within_2pct": 7,
    "median_attempts_to_2pct": 4,
    "median_after_3_attempts_us": 945.7731054999999,
+   "within_10pct": 7,
    "rejected": {
     "duplicate": 62,
     "compile": 1
@@ -91,6 +93,7 @@
    "within_2pct": 7,
    "median_attempts_to_2pct": 5,
    "median_after_3_attempts_us": 944.9314400000001,
+   "within_10pct": 9,
    "rejected": {
     "duplicate": 37,
     "unreadable": 2
@@ -130,6 +133,7 @@
    "within_2pct": 10,
    "median_attempts_to_2pct": 4.5,
    "median_after_3_attempts_us": 944.9314400000001,
+   "within_10pct": 10,
    "rejected": {
     "unreadable": 4,
     "compile": 1
@@ -169,6 +173,7 @@
    "within_2pct": 10,
    "median_attempts_to_2pct": 3.0,
    "median_after_3_attempts_us": 917.0194009999999,
+   "within_10pct": 10,
    "rejected": {
     "compile": 7
    },
@@ -207,6 +212,7 @@
    "within_2pct": 200,
    "median_attempts_to_2pct": 2.0,
    "median_after_3_attempts_us": 916.0777360000001,
+   "within_10pct": 200,
    "rejected": {
     "compile": 47
    },
@@ -625,6 +631,7 @@
    "within_2pct": 200,
    "median_attempts_to_2pct": 2.0,
    "median_after_3_attempts_us": 913.840239,
+   "within_10pct": 200,
    "rejected": {
     "compile": 74
    },
@@ -1043,6 +1050,7 @@
    "within_2pct": 199,
    "median_attempts_to_2pct": 1,
    "median_after_3_attempts_us": 908.9656635,
+   "within_10pct": 200,
    "rejected": {
     "compile": 36
    },
@@ -1461,6 +1469,7 @@
    "within_2pct": 9,
    "median_attempts_to_2pct": 1,
    "median_after_3_attempts_us": 905.1677520000001,
+   "within_10pct": 10,
    "rejected": {
     "duplicate": 50,
     "compile": 7
@@ -1500,6 +1509,7 @@
    "within_2pct": 9,
    "median_attempts_to_2pct": 1,
    "median_after_3_attempts_us": 905.1760850000001,
+   "within_10pct": 10,
    "rejected": {
     "duplicate": 65
    },

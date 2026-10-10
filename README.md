@@ -37,12 +37,33 @@ At the second shape the worst setting is 7.1x slower than the best, and AWS's tu
 | Checker v5: v4, with far moves, and the model names its move | 10 | 1,494.2 µs | 1,494.9 µs | 4 of 10 | 0 of 100 |
 | The v3 menu with a one-line rule (no model) | 200 | 1,361.0 µs | 2,044.9 µs | 78% | 0 |
 
-![Best time found against attempts, adapter shape](results/curve_K256_M4096_N12288.png)
+**The same experiment with three times the sample.** Thirty starting settings, each model arm on its own
+Qwen3-8B server (v2 and the fixed-sentence arm were not rerun):
+
+| Approach | Runs | Final time, median | Within 2% of best | Within 10% of best | Attempts with no measurement |
+|---|---|---|---|---|---|
+| Random choice (no model) | 200 | 1,460.8 µs | 77 of 200 (38%) | 145 of 200 (73%) | 0 |
+| Optimiser on raw profile, no checker | 30 | 1,735.2 µs | 0 of 30 | 3 of 30 | 178 of 300 |
+| Checker v1 | 30 | 2,135.2 µs | 1 of 30 | 3 of 30 | 217 of 300 |
+| Checker v3 | 30 | 1,488.7 µs | 10 of 30 (33%) | 19 of 30 | 83 of 300 |
+| Checker v4 | 30 | 1,406.2 µs | 15 of 30 (50%) | 26 of 30 (87%) | 5 of 300 |
+| Checker v5 | 30 | 1,431.6 µs | 15 of 30 (50%) | 29 of 30 (97%) | 0 of 300 |
+| The v3 menu with a one-line rule (no model) | 200 | 1,361.0 µs | 142 of 200 (71%) | 176 of 200 (88%) | 0 |
+
+With this sample, v4 and v5 end within 10% of the best far more reliably than random (97% against 73%
+for v5). They reach the best setting itself more often than random too (50% against 38%), but with
+30 runs that gap is not conclusive. The one-line rule is still ahead of the model at finding the best.
+
+![Best time found against attempts, adapter shape, 30 starts](results/curve_s30_K256_M4096_N12288.png)
+
+The ten-start chart, with all five checker designs:
+
+![Best time found against attempts, adapter shape, 10 starts](results/curve_K256_M4096_N12288.png)
 
 What this shows, and what it does not:
 
-- The same small model went from far worse than random to level with it, with no wasted attempts,
-  only by changing what the checker tells it. Each design answers a failure read from the previous
+- The same small model went from far worse than random to more reliable than it, with no wasted
+  attempts, only by changing what the checker tells it. Each design answers a failure read from the previous
   design's log; the reasons are in the docstrings in `kopt.py`.
 - The checker's structure is what finds the best setting. A one-line rule on the same menu beats the
   8B model choosing from it.
@@ -55,6 +76,13 @@ What this shows, and what it does not:
 1.14x to 1.31x faster than the unblocked kernel on each of the four shapes, 14.6% less summed over
 the model's 252 projections. This is a sum of standalone kernel times, not the model running.
 
+**Inside a model.** `inference/` puts the kernel into a traced PyTorch model on the chip and times whole-model
+inference (median wall clock of 50 calls). For two feed-forward blocks at Qwen3-8B's sizes, 512 tokens,
+32-bit: 20.12 ms with the unblocked kernel, 17.40 ms with the settings the loop chose per layer (13.5%
+less), 17.26 ms with PyTorch's own matmul. At 16-bit the spread between settings is 3.3x (16.53 ms to
+5.02 ms, PyTorch 4.77 ms) and the 32-bit settings are 1.7x off the best; those 16-bit settings were
+found by hand, not by the loop. These are small models with random weights, not Qwen3-8B itself.
+
 ## Files
 
 | File | What it is |
@@ -66,7 +94,8 @@ the model's 252 projections. This is a sum of standalone kernel times, not the m
 | `report.py` | Tables and charts from the attempt logs |
 | `results/grid_*.jsonl` | Every setting measured on the chip, one JSON line each |
 | `runs/*.jsonl` | Every attempt of every run: setting, stage reached, time, the checker's instruction, the optimiser's reply |
-| `results/summary_*.json`, `curve_*.csv`, `curve_*.png` | The numbers and charts above |
+| `results/summary_*.json`, `curve_*.csv`, `curve_*.png` | The numbers and charts above (`s30` = the 30-start experiment) |
+| `inference/` | The kernel inside a traced PyTorch model: scripts, raw results and setup notes |
 
 ## Reproduce it
 

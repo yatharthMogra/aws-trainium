@@ -25,8 +25,13 @@ def load(paths):
 
 
 def main():
-    size = sys.argv[1]
-    rows = [r for r in load(sys.argv[2:]) if str(r.get("size", size)) == size]
+    args = sys.argv[1:]
+    tag = ""
+    if "--tag" in args:                      # e.g. --tag s30 -> results/summary_s30_<shape>.json
+        tag = args.pop(args.index("--tag") + 1) + "_"
+        args.remove("--tag")
+    size = args[0]
+    rows = [r for r in load(args[1:]) if str(r.get("size", size)) == size]
     grid = [json.loads(l) for l in open(os.path.join(HERE, "results", f"grid_{size}.jsonl")) if l.strip()]
     timed = [g for g in grid if g.get("time_us")]
     optimum = min(g["time_us"] for g in timed)
@@ -39,10 +44,12 @@ def main():
         runs[(r["arm"], r["run"])].append(r)
     arms = collections.defaultdict(list)
     for (arm, _), rs in runs.items():
-        arms[arm].append(sorted(rs, key=lambda r: r["attempt"]))
+        rs = sorted(rs, key=lambda r: r["attempt"])
+        if rs[-1]["attempt"] == max(r["attempt"] for r in rows):      # an unfinished run is not a result
+            arms[arm].append(rs)
 
     os.makedirs(os.path.join(HERE, "results"), exist_ok=True)
-    with open(os.path.join(HERE, "results", f"curve_{size}.csv"), "w", newline="") as f:
+    with open(os.path.join(HERE, "results", f"curve_{tag}{size}.csv"), "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["arm", "run", "attempt", "best_time_us_so_far"])
         for arm, rr in sorted(arms.items()):
@@ -62,17 +69,18 @@ def main():
             hit.append(first)
         reached = [h for h in hit if h is not None]
         after3 = [next(r["best_time_us_so_far"] for r in reversed(rs) if r["attempt"] <= 3) for rs in rr]
+        within10 = sum(f <= optimum * 1.10 for f in finals)
         stages = collections.Counter(r["stage_reached"] for rs in rr for r in rs if r["attempt"] > 0 and r["stage_reached"] != "timed")
         summary[arm] = dict(runs=len(rr), start_us=start, final_median_us=statistics.median(finals), final_min_us=min(finals),
                             final_max_us=max(finals), beat_start=sum(f < start for f in finals), within_2pct=len(reached),
                             median_attempts_to_2pct=statistics.median(reached) if reached else None,
-                            median_after_3_attempts_us=statistics.median(after3),
+                            median_after_3_attempts_us=statistics.median(after3), within_10pct=within10,
                             rejected=dict(stages), finals_us=[round(f, 1) for f in finals], attempts_to_2pct=hit)
         print(f"{arm:9s} {len(rr):4d} {statistics.median(finals):12.1f} {min(finals):8.1f} {max(finals):8.1f} "
               f"{sum(f < start for f in finals):7d}/{len(rr):<2d} {len(reached):6d}/{len(rr):<2d} "
               f"{(statistics.median(reached) if reached else float('nan')):22.1f}  {dict(stages)}")
     json.dump(dict(size=size, grid_best_us=optimum, bar_us=target, arms=summary),
-              open(os.path.join(HERE, "results", f"summary_{size}.json"), "w"), indent=1)
+              open(os.path.join(HERE, "results", f"summary_{tag}{size}.json"), "w"), indent=1)
 
     try:
         import matplotlib
@@ -81,7 +89,7 @@ def main():
     except ImportError:
         print("\nmatplotlib not installed; curve.csv written, no PNG")
         return
-    fig, ax = plt.subplots(figsize=(9, 5), dpi=150)
+    fig, ax = plt.subplots(figsize=(9, 6.2), dpi=150)
     colours = dict(random="#8a8f98", raw="#d97706", template="#b45309", checker="#dc2626", checker2="#7c3aed",
                    checker3="#2563eb", checker4="#059669", checker5="#0891b2", greedy="#111827", greedy5="#6b7280")
     names = dict(random="random choice (no model)", raw="optimiser on raw profile", template="optimiser + fixed sentence",
@@ -103,11 +111,12 @@ def main():
     ax.set_ylabel("best kernel time so far (µs)")
     ax.set_title(f"Matmul {size} on Trainium2: best time found vs attempts")
     ax.grid(alpha=0.25)
-    ax.legend(frameon=False, fontsize=7)
+    ax.legend(frameon=False, fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
     hi = max(statistics.median(rs[min(1, len(rs) - 1)]["best_time_us_so_far"] for rs in rr) for rr in arms.values())
     ax.set_ylim(optimum * 0.97, hi * 1.05)
     fig.tight_layout()
-    fig.savefig(os.path.join(HERE, "results", f"curve_{size}.png"))
+    fig.subplots_adjust(bottom=0.32)
+    fig.savefig(os.path.join(HERE, "results", f"curve_{tag}{size}.png"))
     print("\nwrote results/curve.csv, results/summary.json, results/curve.png")
 
 
