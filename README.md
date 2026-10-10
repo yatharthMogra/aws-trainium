@@ -73,11 +73,31 @@ What this shows, and what it does not:
 - The loop chooses three numbers. It does not write kernel code.
 - At 2048 nothing separates the arms: more than half of all settings are already near the best.
 
-**Per layer of Qwen3-8B** (one checker-loop run per linear-layer shape at 512 tokens, live on the chip):
-1.14x to 1.31x faster than the unblocked kernel on each of the four shapes, 14.6% less summed over
-the model's 252 projections (434.1 ms to 370.9 ms). AWS's compiler, with no hand-written kernel, sums to
-372.6 ms on the same four shapes, so the tuned kernel is level with it on every layer (between 1.5%
-faster and 0.05% slower). These are sums of standalone kernel times, not the model running.
+**Per layer of Qwen3-8B.** One checker-loop run per linear-layer shape at 512 tokens, 32-bit, measured
+live on the chip. "Untuned" is the kernel with all three settings at 1. "AWS compiler" is the same
+multiply written as plain PyTorch and compiled by `neuronx-cc`, with no hand-written kernel.
+
+| Qwen3-8B layer | Our kernel, untuned | Our kernel, tuned by the loop | AWS compiler | Tuned against compiler |
+|---|---|---|---|---|
+| Attention query and output projections | 1,075.3 µs | 906.2 µs | 908.1 µs | 0.2% faster |
+| Attention key and value projections | 321.4 µs | 245.0 µs | 248.0 µs | 1.2% faster |
+| Feed-forward gate and up projections | 3,117.5 µs | 2,667.2 µs | 2,665.9 µs | 0.05% slower |
+| Feed-forward down projection | 3,029.1 µs | 2,664.7 µs | 2,706.3 µs | 1.5% faster |
+| Whole model, 252 projections | 434.1 ms | 370.9 ms | 372.6 ms | 0.5% faster |
+
+Untuned, the hand-written kernel is 14% to 31% slower than the compiler. Tuned by the loop it is level
+with it on every layer. This is a tie, not a win: the compiler was measured on different seats from the
+kernel, and timings across seats have agreed to about 0.3%. The totals are sums of standalone kernel
+times, not the model running. Raw compiler measurements: `results/compiler_default_layers.json`.
+
+At 16-bit, measured as one whole feed-forward block (three multiplies) by inference time:
+
+| One Qwen3-8B feed-forward block, 16-bit | Inference time |
+|---|---|
+| Our kernel, untuned | 8,635 µs |
+| Our kernel, tuned by the loop (five runs) | 2,862 to 2,894 µs |
+| Best of all 72 settings | 2,860 µs |
+| AWS compiler | 2,745 µs |
 
 **Inside a model.** `inference/` puts the kernel into a traced PyTorch model on the chip and times whole-model
 inference (median wall clock of 50 calls). For two feed-forward blocks at Qwen3-8B's sizes, 512 tokens,
