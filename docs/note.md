@@ -83,7 +83,7 @@ Measured before building the loop. AWS's four tutorial matmul versions at 2048, 
 each, all correct (`results/tutorial_matmul_sweep_2048.json`).
 
 | Version | Time (µs) | Tensor engine busy | Data movement busy | Bytes moved | Transfers |
-|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|
 | Tiled (naive) | 1258.6 | 80.6% | 90.7% | 318,767,104 | 1600 |
 | Loads hoisted | 1093.2 | 87.3% | 92.4% | 301,989,888 | 1344 |
 | Blocked | 1019.6 | 90.6% | 62.3% | 167,772,160 | 832 |
@@ -207,7 +207,7 @@ width. Qwen3-8B's config (hidden 4096, intermediate 12288, 32 heads and 8 key-va
 each, measured live on the chip (`runs/layer_*.jsonl`).
 
 | Layer | Shape (K / M / N) | Per layer × layers | Legal settings | AWS default 16/2/8 | Loop result | AWS compiler, no hand-written kernel |
-|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|
 | Attention query and output projections | 4096 / 512 / 4096 | 2 × 36 | 72 | Illegal | 1,075.3 → 906.2 µs at 4/4/8 (1.19x) | 908.1 µs |
 | Attention key and value projections | 4096 / 512 / 1024 | 2 × 36 | 36 | Illegal | 321.4 → 245.0 µs at 2/2/16 (1.31x) | 248.0 µs |
 | Feed-forward gate and up projections | 4096 / 512 / 12288 | 2 × 36 | 144 | Illegal | 3,117.5 → 2,667.2 µs at 1/8/2 (1.17x) | 2,665.9 µs |
