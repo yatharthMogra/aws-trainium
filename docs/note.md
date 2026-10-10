@@ -2,8 +2,8 @@
 
 Hack the Chip, NYU × Annapurna Labs. Track: kernel optimisation. Seats 205–209.
 
-> Status: sections 1–4 and the 2048 grid are measured. Arm results at 2048 are in for three arms
-> and partial for the checker arm. Every `TBD` is a placeholder, not a result.
+> Status: everything at size 2048 is final, and the adapter-shape grid is measured. Arm results at
+> the adapter shape and the per-layer runs are in progress. Every `TBD` is a placeholder.
 
 ## 1. What we built
 
@@ -129,20 +129,22 @@ setting in a few attempts at this shape.
 - **Why different starts.** Repeating a run from the same start is not independent: the served model answers the same prompt almost identically each time. Two checker runs from 1/1/1 matched for seven attempts.
 - **Settings:** Qwen3-8B for both agents, temperature 0.6, top_p 0.95, thinking off, 8,192-token server context. Chip measurements are cached per setting (three captures, median).
 
-| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of grid best | Attempts rejected as duplicates | Attempts rejected at compile |
-|---|---|---|---|---|---|---|
-| Random | 10 | 906.8 | 904.8 to 911.7 | 10 of 10 | 0 | 2 |
-| Raw profile | 10 | 905.2 | 904.7 to 938.8 | 9 of 10 | 50 | 7 |
-| Template | 10 | 905.2 | 904.7 to 938.8 | 9 of 10 | 65 | 0 |
-| Checker (partial: 5 of 10 runs) | 5 | 906.2 | 905.2 to 913.8 | 5 of 5 | 5 | 4 |
+| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of grid best | Median attempts to get within 2% | Median time after 3 attempts (µs) | Rejected: duplicate | Rejected: compile |
+|---|---|---|---|---|---|---|---|---|
+| Random | 10 | 906.8 | 904.8 to 911.7 | 10 of 10 | 2 | 913.7 | 0 | 2 |
+| Raw profile | 10 | 905.2 | 904.7 to 938.8 | 9 of 10 | 1 | 905.2 | 50 | 7 |
+| Template | 10 | 905.2 | 904.7 to 938.8 | 9 of 10 | 1 | 905.2 | 65 | 0 |
+| Checker | 10 | 905.3 | 905.1 to 947.7 | 9 of 10 | 2 | 916.1 | 35 | 5 |
 
-Grid best is 904.7 µs, so "within 2%" means 922.8 µs or faster. Each run has 10 attempts, so 10 runs
-are 100 attempts. The checker row is not final.
+Grid best is 904.7 µs, so "within 2%" means 922.8 µs or faster. Each arm made 100 attempts (10 runs
+of 10). Every run in every arm ended faster than its start. Source: `results/summary_2048.json`.
 
-**Reading so far.**
-- **No arm is ahead on final time.** Every arm ends within about 0.2% of the others at the median, and random choice gets all 10 runs within 2% of the best. At this shape the speed-up does not come from the checker's guidance.
-- **One real difference is wasted attempts.** Without the checker model, the optimiser proposed a setting it had already tried in 50 to 65 of 100 attempts. With the checker's instruction it has done so in 5 of 50 so far.
-- Still to come: median attempts to get within 2%, and median time after 3 attempts (`TBD`).
+**Reading.**
+- **No arm is ahead.** Final medians are within 0.2% of each other, and random choice is the only arm with all 10 runs within 2% of the best. At this shape the speed-up does not come from the models' guidance.
+- **The checker did not make the loop faster.** The raw-profile arm got within 2% in a median of 1 attempt and the checker arm in 2, the same as random.
+- **The checker modestly reduced repeated proposals:** 35 of 100 attempts were settings already tried, against 50 (raw) and 65 (template).
+- **Raw and template are not independent confirmations of each other.** Their first move is the same setting in all 10 runs, and the one run that ended at 938.8 µs is the same start in both, where both got stuck re-proposing tried settings. At this shape the template sentence barely changes what the optimiser does.
+- **Each model arm has one run that got stuck** outside the 2% bar; random has none.
 
 Attempt logs, every attempt with its stage and score: `runs/<arm>_2048_v2.jsonl`. Summary and
 chart: `results/summary.json`, `results/curve.csv`, `results/curve.png`.
@@ -171,28 +173,35 @@ settings.
 assertions: K=256 is 2 tiles and the default needs K divisible by 1024. So there is no shipped
 setting to fall back on at this shape.
 
-**Probe of 8 settings** on the chip (seat 209, two captures each, all correct). The full grid of 96
-is `TBD`.
+**Full grid** on the chip: all 96 settings, two captures each, all correct, none failed to compile.
+Data: `results/grid_K256_M4096_N12288.jsonl`.
 
-| Setting (M/N/K) | Time (µs) | Tensor engine busy |
-|---|---|---|
-| 16/2/2 | 1,495.6 | 91.1% |
-| 32/1/2 | 1,501.4 | 91.2% |
-| 4/2/1 | 1,540.7 | 90.3% |
-| 1/1/1 | 1,629.2 | 87.4% |
-| 1/24/2 | 2,938.6 | 48.4% |
-| 32/4/1 | 2,977.7 | 57.4% |
-| 8/24/1 | 3,905.6 | 44.8% |
-| 32/24/2 | 7,278.5 | 31.4% |
+| Fact | Value |
+|---|---|
+| Best setting, 4/1/2 | 1,360.9 µs (tensor engine 97.2% busy) |
+| Unblocked, 1/1/1 | 1,629.2 µs; the best is 1.20x faster |
+| Median setting | 2,147.6 µs |
+| Worst setting, 4/24/1 | 9,716.6 µs (tensor engine 23.4% busy), 7.14x slower than the best |
+| Settings within 2% / 10% / 50% of the best | 4 / 11 / 44 of 96 |
 
-- Within these 8 settings the spread is 4.9x. At 2048 the whole grid spans 1.34x.
-- "Bigger blocks are better" held at 2048 and is badly wrong here: the largest blocks are the slowest.
-- The unblocked start (1/1/1) is already near the good region. So the question at this shape is not how much faster than the start, but whether an arm avoids the settings that cost up to 4.9x.
+- A wrong setting costs up to 7.14x here. At 2048 the whole grid spans 1.34x.
+- Only 4 of 96 settings are within 2% of the best, against 39 of 75 at 2048. Random choice has roughly a 1-in-3 chance of hitting one in 10 draws, so this shape can separate the arms.
+- "Bigger blocks are better" held at 2048 and is wrong here: the slowest settings are the ones with large N blocks.
 
-Arm results at this shape: `TBD`.
+**Arm design at this shape.** 10 runs per arm, 10 attempts each, same starts for every arm. The
+starts are not the 10 slowest, because that would begin every run in the worst corner. They are
+spread evenly by rank through the slowest 90% of the grid, from 4/24/1 (9,717 µs) to 16/2/2
+(1,496 µs). Headline metrics: final time, and runs ending within 2% and within 10% of the best.
+
+| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of best | Runs within 10% of best | Rejected: duplicate | Rejected: compile |
+|---|---|---|---|---|---|---|---|
+| Random | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Raw profile | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Template | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Checker | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
 **Other shapes tried.**
-- *Qwen3-8B's feed-forward projection* (K=4096, M=512, N=12288): compute-limited whatever the settings. In a partial grid (about 20 of 144 settings), every setting that ran landed between 2,666 and 2,724 µs with the tensor engine 98–99% busy. AWS's default is illegal here too (M=512 is 4 tiles; it needs M divisible by 2048). Not used for the arms.
+- *Qwen3-8B's feed-forward projection* (K=4096, M=512, N=12288): mostly flat. In a partial grid (41 of 144 settings measured), 34 ran and 7 overflowed the on-chip buffer. Of the 34, the best is 2,663.6 µs and 28 are within 2% of it, with one bad outlier at 5,626.3 µs. AWS's default is illegal here too (M=512 is 4 tiles; it needs M divisible by 2048). Not used for the arms.
 - *Square 4096:* a three-setting probe gave 10,092.8 µs at 1/1/1 and 7,062.0 µs at 4/2/4, about 1.43x, but the full grid was too slow to finish in the day.
 
 ### 5.5 From a kernel to a model
@@ -206,9 +215,9 @@ at 512 tokens:
 |---|---|---|---|---|---|
 | Attention query and output projections | 4096 / 512 / 4096 | 2 × 36 | 72 | Illegal | `TBD` |
 | Attention key and value projections | 4096 / 512 / 1024 | 2 × 36 | 36 | Illegal | `TBD` |
-| Feed-forward gate and up projections | 4096 / 512 / 12288 | 2 × 36 | 144 | Illegal | Flat: 2,666 to 2,724 µs over about 20 settings (partial) |
+| Feed-forward gate and up projections | 4096 / 512 / 12288 | 2 × 36 | 144 | Illegal | Mostly flat: 28 of 34 settings within 2% of the best, 2,663.6 µs (partial grid) |
 | Feed-forward down projection | 12288 / 512 / 4096 | 1 × 36 | 144 | Illegal | `TBD` |
-| Rank-256 adapter weight product | 256 / 4096 / 12288 | not in the base model | 96 | Illegal | 4.9x spread over 8 settings (probe) |
+| Rank-256 adapter weight product | 256 / 4096 / 12288 | not in the base model | 96 | Illegal | 7.14x spread over the full grid; best 1,360.9 µs |
 
 The shape, settings-count and legality columns are **computed from the config and the kernel's own
 rules, not measured**. What they show: at 512 tokens, AWS's tutorial default runs on none of this
@@ -220,8 +229,8 @@ Limits of this table:
 - These are float32 standalone kernels at the model's shapes. The model itself is not running on them, so there is no tokens-per-second number.
 - The adapter row's M=4096 is a weight-product dimension, not a token count.
 
-Planned if chip time allows: one checker-loop run per row, so the claim becomes "the loop tuned
-every linear-layer matmul shape in Qwen3-8B". Status: `TBD`.
+In progress: one checker-arm run of 10 attempts from 1/1/1 at each of the four base-model shapes,
+measured live on the chip. Results: `TBD`.
 
 ### 5.6 What went wrong along the way
 

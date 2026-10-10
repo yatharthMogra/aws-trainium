@@ -6,8 +6,8 @@ settings and log stages are already agreed and written into the note.
 ## Numbers
 
 1. Full grid at 2048: received and written into the note.
-2. **2048 arms:** the final checker row (10 of 10 runs); for every arm, median attempts to get within 2% and median time after 3 attempts.
-3. **Adapter shape** (K=256, M=4096, N=12288): the full grid of 96 (best, worst, share within 2% of best, count failing to compile), the exact assertion text for AWS's 16/2/8, the starts used, and per-arm numbers.
+2. 2048 arms: final, received and written into the note.
+3. **Adapter shape** (K=256, M=4096, N=12288): grid received. Still needed: per-arm numbers (including runs within 10% of best) and the exact assertion text for AWS's 16/2/8.
 
 ## Files
 
