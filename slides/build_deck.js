@@ -121,6 +121,33 @@ s.addImage({ path: path.join(__dirname, "..", "architecture-diagram.jpeg"), x: 1
   altText: "Architecture diagram: a loop driver sends M, N, K settings to a blocked matmul kernel on a Trainium2 NeuronCore on seats 206 to 209; neuron-explorer profiles it; the result goes to a checker model and an optimiser model, both Qwen3-8B on seat 205; side measurements on seat 170 compare traced models with the AWS compiler default; below, the hackathon repo, AWS's NKI skills and the Neuron SDK that the work builds on" });
 s.addNotes("The full picture. On the left, the loop driver on our laptop starts runs. Seat 205 serves Qwen3-8B, which plays both the checker and the optimiser. Seats 206 to 209 are the measuring checker: the blocked matmul kernel runs on a NeuronCore and neuron-explorer profiles it. Every attempt is logged, and the full sweep gives the ground truth. On the right are the side measurements: traced models against the AWS compiler default, the simulator comparison, and AWS's own recommend tool. At the bottom is what we built on.");
 
+// ---------------------------------------------------------------- AWS profiling tools
+s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Pitch" });
+s.addText("The AWS profiling tools behind every number", { placeholder: "title" });
+const tools = [
+  ["neuron-explorer capture", "Records a hardware trace of the compiled kernel on one NeuronCore. We take the median of three captures."],
+  ["neuron-explorer view", "Turns the trace into a 115-field summary. We read time, engine busy, data-movement busy, bytes and transfers."],
+  ["NKI and neuronx-cc", "Compile and run the kernel standalone on the chip. The CPU simulator, nki.simulate, was our comparison."],
+  ["Neuron agentic skills", "AWS's NKI profiling recipe and profile-querying guide, adapted because the pods lack torch_neuronx."],
+  ["neuron-explorer recommend", "AWS's Bedrock-powered advisor. Read in print-only mode (a 155,604-character prompt); not used in the loop."],
+];
+tools.forEach(([name, what], i) => {
+  const y = 1.6 + i * 1.02;
+  s.addShape(pres.shapes.OVAL, { x: 0.6, y: y + 0.08, w: 0.5, h: 0.5, fill: { color: i === 4 ? C.accent3 : C.accent1 }, line: { color: i === 4 ? C.accent3 : C.accent1, width: 0 }, objectName: `Tool badge ${i + 1}` });
+  text(s, String(i + 1), { x: 0.6, y: y + 0.08, w: 0.5, h: 0.5, fontSize: 16, bold: true, color: C.background1, align: "center", valign: "middle", objectName: `Tool number ${i + 1}` });
+  text(s, name, { x: 1.3, y, w: 6.2, h: 0.36, fontSize: 17, bold: true, objectName: `Tool name ${i + 1}` });
+  text(s, what, { x: 1.3, y: y + 0.37, w: 6.2, h: 0.58, fontSize: 14, color: C.text2, objectName: `Tool use ${i + 1}` });
+});
+card(s, 8.0, 1.6, 4.7, 5.0, "Profile card", C.text1);
+text(s, "One profile, in numbers", { x: 8.3, y: 1.8, w: 4.1, h: 0.45, fontSize: 20, bold: true, color: C.accent5, fontFace: THEME.headFontFace, objectName: "Profile heading" });
+text(s, "AWS's fully optimised matmul at 2048, on the chip", { x: 8.3, y: 2.28, w: 4.1, h: 0.55, fontSize: 13, color: C.accent5, objectName: "Profile subject" });
+[["905.8 µs", "time on the chip"], ["97.5%", "tensor engine busy"], ["21.7%", "data movement busy"], ["67.1 MB", "moved in 96 transfers"]].forEach(([big, small], i) => {
+  const y = 3.0 + i * 0.88;
+  text(s, big, { x: 8.3, y, w: 2.1, h: 0.7, fontSize: 26, bold: true, color: C.background1, fontFace: THEME.headFontFace, valign: "middle", objectName: `Profile value ${i + 1}` });
+  text(s, small, { x: 10.4, y, w: 2.1, h: 0.7, fontSize: 14, color: C.accent5, valign: "middle", objectName: `Profile label ${i + 1}` });
+});
+s.addNotes("Every time in this deck comes from AWS's own profiler. neuron-explorer capture records a hardware trace of the compiled kernel on one core, and neuron-explorer view turns it into a summary with 115 fields; we read time, how busy the tensor engine and data movement were, and bytes and transfers. NKI and the neuronx-cc compiler build and run the kernel standalone. We followed the profiling recipe from AWS's agentic skills, adapted because the pods have no torch_neuronx. We also looked at neuron-explorer recommend, AWS's Bedrock-powered advisor, in print-only mode: it sends a 155,604-character prompt and advises a person, so it is not in our loop. The pods expose no power reading, so we have no energy figures.");
+
 // ---------------------------------------------------------------- 4. what we tried
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Pitch" });
 s.addText("What we tried: five checker designs, one model", { placeholder: "title" });
