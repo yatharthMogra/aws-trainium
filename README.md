@@ -1,0 +1,159 @@
+# Kernel settings, tuned on the chip by two small models
+
+Hack the Chip (NYU × Annapurna Labs), kernel optimisation track.
+
+A hand-written Trainium kernel has settings that decide how fast it runs. The right values change with
+the shape of the data, and a wrong choice can be several times slower. This repo is a loop that picks
+them automatically: a **checker** agent reads measurements taken on the real chip, an **optimiser**
+agent edits the kernel, and the chip measures the result. Both agents are Qwen3-8B. No larger model is
+in the loop.
+
+The write-up and pitch are in `docs/` (`note.md`, `pitch.md`).
+
+## What is measured
+
+Everything below was run on a Trainium2 NeuronCore (`trn2`, one physical core, float32), verified
+against NumPy on every attempt, and timed with `neuron-explorer`.
+
+**Where settings matter and where they do not.** Every legal setting of a blocked matmul kernel, at two shapes:
+
+| Shape | Settings | Best | Unblocked start | Worst | Within 2% of best |
+|---|---|---|---|---|---|
+| 2048 × 2048 × 2048 | 75 (74 run) | 904.7 µs | 1,209.3 µs | 1,209.3 µs | 39 of 75 |
+| K=256, M=4096, N=12288 (adapter-style, on Qwen3-8B's layer widths) | 96 | 1,360.9 µs | 1,629.2 µs | 9,716.6 µs | 4 of 96 |
+
+At the second shape the worst setting is 7.1x slower than the best, and AWS's tutorial default
+(16, 2, 8) is not legal.
+
+**The loop, at the second shape.** Ten attempts per run, the same ten starting settings for every arm:
+
+| Approach | Runs | Final time, median | Worst run | Within 2% of best | Attempts with no measurement |
+|---|---|---|---|---|---|
+| Random choice (no model) | 200 | 1,467.0 µs | 2,097.3 µs | 35% | 0 |
+| Checker v1: model reads raw profile numbers | 10 | 2,284.8 µs | 3,114.8 µs | 0 of 10 | 66 of 100 |
+| Checker v2: model is shown measured single-change comparisons | 10 | 1,553.3 µs | 2,843.4 µs | 1 of 10 | 70 of 100 |
+| Checker v3: model picks from a menu of measured moves | 10 | 1,491.6 µs | 3,775.8 µs | 4 of 10 | 25 of 100 |
+| Checker v4: v3, and the optimiser's edit is verified before chip time | 10 | 1,494.9 µs | 1,937.6 µs | 4 of 10 | 2 of 100 |
+| Checker v5: v4, with far moves, and the model names its move | 10 | 1,494.2 µs | 1,494.9 µs | 4 of 10 | 0 of 100 |
+| The v3 menu with a one-line rule (no model) | 200 | 1,361.0 µs | 2,044.9 µs | 78% | 0 |
+
+![Best time found against attempts, adapter shape](results/curve_K256_M4096_N12288.png)
+
+What this shows, and what it does not:
+
+- The same small model went from far worse than random to level with it, with no wasted attempts,
+  only by changing what the checker tells it. Each design answers a failure read from the previous
+  design's log; the reasons are in the docstrings in `kopt.py`.
+- The checker's structure is what finds the best setting. A one-line rule on the same menu beats the
+  8B model choosing from it.
+- The tuned kernel ties the compiler's own matmul at this shape (1,360.9 µs against 1,355.1 µs). It
+  does not beat it.
+- The loop chooses three numbers. It does not write kernel code.
+- At 2048 nothing separates the arms: more than half of all settings are already near the best.
+
+**Per layer of Qwen3-8B** (one checker-loop run per linear-layer shape at 512 tokens, live on the chip):
+1.14x to 1.31x faster than the unblocked kernel on each of the four shapes, 14.6% less summed over
+the model's 252 projections. This is a sum of standalone kernel times, not the model running.
+
+## Files
+
+| File | What it is |
+|---|---|
+| `kernels/matmul_blocked.py` | The kernel being tuned: AWS's tutorial blocked matmul, with its three block-size lines set to 1 |
+| `chip.py` | Compile one kernel, run it on a NeuronCore, verify it against NumPy, profile it |
+| `hwcheck.py` | The same on-chip check for the hackathon's `nkibench.py` levels (its missing layers 2 and 3) |
+| `kopt.py` | The loop: the checker and optimiser agents, every arm, and the no-model baselines |
+| `report.py` | Tables and charts from the attempt logs |
+| `results/grid_*.jsonl` | Every setting measured on the chip, one JSON line each |
+| `runs/*.jsonl` | Every attempt of every run: setting, stage reached, time, the checker's instruction, the optimiser's reply |
+| `results/summary_*.json`, `curve_*.csv`, `curve_*.png` | The numbers and charts above |
+
+## Reproduce it
+
+You need two seat pods from the hackathon cluster: one serves the model, the other's chip runs
+kernels. They cannot be the same seat, because the model server takes every core on its chip.
+
+### 1. Without a chip: recompute the tables from the logs (any laptop)
+
+```bash
+pip install matplotlib
+S=K256_M4096_N12288
+python report.py $S runs/random_x200_s10_$S.jsonl runs/greedy_x200_s10_$S.jsonl \
+    runs/raw_$S.jsonl runs/template_$S.jsonl runs/checker_$S.jsonl \
+    runs/checker2_$S.jsonl runs/checker3_$S.jsonl runs/checker4_$S.jsonl runs/checker5_$S.jsonl
+```
+
+The no-model arms replay from the cached chip measurements, so they also run anywhere:
+
+```bash
+pip install httpx
+python kopt.py --arm random --runs 200 --nstarts 10 --size $S --starts spread --no-live --out /tmp/random.jsonl
+python kopt.py --arm greedy --runs 200 --nstarts 10 --size $S --starts spread --no-live --out /tmp/greedy.jsonl
+```
+
+### 2. With the chips: run the loop
+
+On your laptop, with the workshop credentials and `kubectl` pointed at the cluster (the hackathon
+README, steps 1 to 4). Below, `seat-A` serves the model and `seat-B` has the free chip.
+
+```bash
+# start the model on seat-A (about 4 minutes) and note its address
+kubectl exec seat-A -- bash -c 'cd /workspace && ./serve.sh'
+IP=$(kubectl get pod seat-A -o jsonpath='{.status.podIP}')
+
+# put this repo on seat-B
+tar cf - chip.py hwcheck.py kopt.py report.py kernels results | \
+    kubectl exec -i seat-B -- bash -c 'mkdir -p /workspace/kopt && cd /workspace/kopt && tar xf -'
+kubectl exec -it seat-B -- bash
+```
+
+Inside `seat-B`:
+
+```bash
+cd /workspace/kopt
+export KOPT_BASE_URL=http://<IP of seat-A>:8000/v1
+
+# one kernel on the chip: correct? how fast? how busy was each engine?
+python chip.py --grid "1,1,1;4,1,2" --size K256_M4096_N12288
+
+# the loop: checker v5 and the Qwen3-8B optimiser, 10 runs of 10 attempts
+python kopt.py --arm checker5 --runs 10 --attempts 10 --size K256_M4096_N12288 \
+    --starts spread --out runs/my_checker5.jsonl
+
+# a shape nobody has measured: every attempt is compiled and timed live (about 30 s each)
+python kopt.py --arm checker5 --runs 1 --attempts 10 --size K4096_M512_N4096 \
+    --starts unblocked --out runs/my_layer.jsonl
+```
+
+Arms: `random`, `raw`, `template`, `checker` (v1), `checker2` … `checker5`, `greedy`, `greedy5`.
+Settings already in `results/grid_<shape>.jsonl` are read from that cache instead of being measured
+again; delete the file to force every attempt onto the chip.
+
+To measure a whole grid yourself:
+
+```bash
+python chip.py --grid "1,1,1;1,1,2;..." --size K256_M4096_N12288 --reps 3 --out results/grid_mine.jsonl
+```
+
+## Things that will bite you
+
+All found the hard way on these pods.
+
+- **Measure at one physical core.** At the pod's default (`NEURON_LOGICAL_NC_CONFIG=2`) a kernel runs
+  on both physical cores and every byte and transfer count comes back exactly doubled. `chip.py` and
+  `hwcheck.py` set it to 1.
+- **The model server and a kernel cannot share a chip.** The hackathon README says two cores stay
+  free; on our pods every core request was refused with "cores busy" while the server was up.
+- **Do not send the model server a `seed` parameter.** It killed the vLLM engine and the server had
+  to be restarted.
+- **Repeating a run is not an independent sample.** The server answers the same prompt almost
+  identically each time, so runs here differ by their starting setting.
+- **The simulator's byte counts are not the chip's.** At the hackathon's small test shapes the chip
+  moved the minimum where `nki.simulate` counted up to 2x; at 2048 the waste is real on the chip.
+- **Call kernels with NumPy arrays.** The pods have no `torch_neuronx`, so the torch route in AWS's
+  profiling skill fails; NKI's standalone mode works.
+
+## Credits
+
+The kernel is adapted from the AWS Neuron NKI matrix multiplication tutorial. The hackathon harness
+(`nkibench.py`, `serve.sh`) is from `yahavb/trainium-agent-labs`.
