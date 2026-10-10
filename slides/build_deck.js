@@ -42,6 +42,15 @@ pres.defineSlideMaster({
   slideNumber: { x: 12.2, y: 6.95, w: 0.5, h: 0.3, fontSize: 10, color: THEME.colors.accent3, align: "right" },
 });
 
+pres.defineSlideMaster({
+  title: "FULL_IMAGE",
+  background: { color: THEME.colors.lt1 },
+  objects: [
+    { placeholder: { options: { name: "title", type: "title", x: 0.6, y: 0.2, w: 12.1, h: 0.55, fontSize: 24, bold: true, color: C.text1, align: "left", valign: "middle", margin: 0 }, text: "" } },
+  ],
+  slideNumber: { x: 12.2, y: 7.1, w: 0.5, h: 0.3, fontSize: 10, color: THEME.colors.accent3, align: "right" },
+});
+
 const card = (slide, x, y, w, h, name, fill) =>
   slide.addShape(pres.shapes.ROUNDED_RECTANGLE, { x, y, w, h, rectRadius: 0.08, fill: { color: fill || C.background2 }, line: { color: fill || C.background2, width: 0 }, objectName: name });
 const text = (slide, t, o) => slide.addText(t, Object.assign({ isTextBox: true, margin: 0, color: C.text1, valign: "top" }, o));
@@ -77,7 +86,7 @@ s.addNotes("Before a kernel can compute it has to move data from the chip's larg
 
 // ---------------------------------------------------------------- 3. architecture
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Pitch" });
-s.addText("Architecture: a loop in which the chip is the judge", { placeholder: "title" });
+s.addText("How it works: a loop in which the chip is the judge", { placeholder: "title" });
 const boxes = [
   { x: 0.9, y: 1.7, t: "1  Kernel", d: "AWS's blocked matmul, with three block-size settings (M, N, K)", col: C.accent3 },
   { x: 8.1, y: 1.7, t: "2  Trainium2 core", d: "Compile, run, verify against a reference, profile: time, engine busy, bytes moved", col: C.text1 },
@@ -104,6 +113,13 @@ text(s, [
   { text: "Nothing larger than 8B in the loop", options: {} },
 ], { x: 5.2, y: 3.35, w: 2.9, h: 1.3, fontSize: 14, color: C.text1, align: "center", valign: "middle", objectName: "Loop rules" });
 s.addNotes("Three roles, as our mentor asked for. The workload is AWS's blocked matmul kernel. The checker is code that runs the kernel on the chip and first asks whether the answer is still right, then a small model reads the measurements and says what to change. The optimiser is a second small model that edits the setting. Then we measure again. The models choose three numbers; they do not write kernel code.");
+
+// ---------------------------------------------------------------- architecture (the team's diagram)
+s = pres.addSlide({ masterName: "FULL_IMAGE", sectionTitle: "Pitch" });
+s.addText("Architecture: the tuning loop, the side measurements, and what we built on", { placeholder: "title" });
+s.addImage({ path: path.join(__dirname, "..", "architecture-diagram.jpeg"), x: 1.78, y: 0.85, w: 9.78, h: 6.5, objectName: "Architecture diagram",
+  altText: "Architecture diagram: a loop driver sends M, N, K settings to a blocked matmul kernel on a Trainium2 NeuronCore on seats 206 to 209; neuron-explorer profiles it; the result goes to a checker model and an optimiser model, both Qwen3-8B on seat 205; side measurements on seat 170 compare traced models with the AWS compiler default; below, the hackathon repo, AWS's NKI skills and the Neuron SDK that the work builds on" });
+s.addNotes("The full picture. On the left, the loop driver on our laptop starts runs. Seat 205 serves Qwen3-8B, which plays both the checker and the optimiser. Seats 206 to 209 are the measuring checker: the blocked matmul kernel runs on a NeuronCore and neuron-explorer profiles it. Every attempt is logged, and the full sweep gives the ground truth. On the right are the side measurements: traced models against the AWS compiler default, the simulator comparison, and AWS's own recommend tool. At the bottom is what we built on.");
 
 // ---------------------------------------------------------------- 4. what we tried
 s = pres.addSlide({ masterName: "CONTENT", sectionTitle: "Pitch" });
