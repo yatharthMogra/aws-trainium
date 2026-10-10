@@ -1,24 +1,8 @@
 # What the write-up still needs from the agent loop
 
-Everything below fills a `TBD` in `docs/note.md` or `docs/pitch.md`. Definitions of the arms,
-settings and log stages are already agreed and written into the note.
+Everything else has been received and written into `docs/note.md` and `docs/pitch.md`.
 
-## Numbers
-
-1. Full grid at 2048: received and written into the note.
-2. 2048 arms: final, received and written into the note.
-3. **Adapter shape** (K=256, M=4096, N=12288): grid received. Still needed: per-arm numbers (including runs within 10% of best) and the exact assertion text for AWS's 16/2/8.
-
-## Files
-
-4. `runs/<arm>_2048_v2.jsonl`, `results/curve.csv` and `results/curve.png` on `main`, so the note can point at them.
-
-## Excerpts for the pitch
-
-5. One good and one bad exchange: received and written into the note and pitch.
-
-## To confirm
-
-6. Which pitch opening the results support: A (speed-up, random matches it), B (checker clearly ahead) or C (no speed-up).
-7. **Per-layer table** (note section 5.5): measured results for the three unmeasured rows, and how many of the five shapes the loop tuned.
-8. **Model-level figures** (note section 5.6): the sum over 252 projections before and after, and the compiler-default matmul time with its shape, or the exact failure if the compile does not work.
+1. **Checker v2** at both shapes: runs, median final time, range, runs within 2% of best, rejected counts, and one before/after example of the message the checker model saw.
+2. **Which opening** in `pitch.md` the v2 result supports: draft 1 (v2 beats random) or draft 2 (it does not).
+3. The exact assertion text for AWS's 16/2/8 at the adapter shape, if captured.
+4. `results/curve.png` (or CSV) for both shapes, including the 200-run random baseline.

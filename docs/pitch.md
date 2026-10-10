@@ -3,32 +3,31 @@
 `TBD` marks a number that does not exist until the agent loop has finished. Do not say a number
 that is not in `docs/note.md`.
 
-## 0:00 — The opening (pick one once results are in)
+## 0:00 — The opening (two drafts; choose when checker v2 reports)
 
-Size 2048 is final and supports A. The adapter-shape arms are still running; if the checker arm is clearly ahead there, use B and keep the 2048 result as the honest null.
+What is settled: at size 2048 every arm, including random, reaches the best. At the adapter shape
+the first version of the loop lost to random choice. The redesigned checker (v2) is still running.
 
-**A. The loop sped the kernel up, and random search did about as well.** Expected at size 2048.
+**Draft 1: v2 beats random. "We read the log and changed the message."**
 
-> "We built a loop of two 8-billion-parameter models that tunes a matmul kernel on Trainium2 with
-> no human involved. From the slowest settings, up to 1,209 microseconds, it reached 905 in 9 runs
-> out of 10, where 905 is the best possible, measured on the real chip. And building the checker for it turned up
-> things about measuring on this chip that we did not expect."
+> "We built a loop of two 8-billion-parameter models that tunes a kernel on Trainium2 with nobody
+> involved. On an easy shape it worked. On a hard one it lost to random guessing. So we read its
+> log. The checker was telling the optimiser 'increase N' while its own measurements said that made
+> things 2.6x slower. We changed one thing, the feedback, not the model. Now it gets within 2% of
+> the best in **TBD** of 10 runs, against one in three for random."
 
-Then go to the method, then "What the checker caught", then the arm comparison as an honest null.
+Then: the method, the before and after of the checker's message, the chart, what the chip taught us.
 
-**B. The checker's instruction clearly beat the other arms.** Possible on the second shape.
+**Draft 2: v2 does not beat random. "For this problem, the checker matters and the model does not."**
 
-> "AWS ships good settings for this kernel at one shape. Move to a shape from a real model's
-> adapter layer and those settings do not even run, and a wrong choice costs up to 7x. Same
-> small model, same number of attempts: with raw profile numbers it reached **TBD**. With one
-> sentence from our checker it reached **TBD**."
+> "We set out to show that small models, given the right feedback, can tune a kernel on Trainium2.
+> We measured every setting on the real chip, 75 at one shape and 96 at another, so we know the
+> right answers. Then we ran the models against random guessing. Random won. Here is exactly why,
+> and here is what was worth building anyway: a checker that measures on the chip, and what it
+> caught."
 
-Then the method, then the chart, then "What the checker caught".
-
-**C. The loop produced no speed-up.**
-
-Lead with "What the checker caught", and say plainly that the small-model loop did not get there
-and where it stalled.
+Then: the method, the arm table, why the models lost, what the checker caught, the in-model
+inference numbers.
 
 ## 0:30 — The method
 
@@ -66,55 +65,57 @@ Two findings from building the on-chip measurement, both measured.
 
 ## 2:00 — The comparison
 
-Show the chart (`results/curve.png`): best time so far against attempt number, one line per arm,
-with the grid best as a dashed line.
+Show the chart: best time so far against attempt number, one line per arm, with the grid best as a
+dashed line.
 
-| Arm | What it tells you |
-|---|---|
-| Random | What you get with no model |
-| Raw profile | The small model reading numbers on its own |
-| Template | A fixed sentence written by code |
-| Checker | The checker model's instruction |
-
-*If the arms do not separate (opening A):*
-
-> "We measured all 75 settings. 39 of them are within 2% of the best, and AWS's own default is one
-> of those. So random search finds a good one in a few tries. The models matched it; they did not
-> beat it: every arm ends within 0.2% of the others. The checker's one measurable effect was
-> modest. It cut repeated proposals from 50 to 65 in 100 attempts down to 35. On the adapter
-> shape, where only 4 of 96 settings are good, **TBD**."
-
-*If they do separate (opening B):* give the two numbers and the number of runs.
-
-Either way, show the adapter-shape contrast (both grids fully measured on the chip):
-
-| | Size 2048 | Adapter shape (K=256, M=4096, N=12288) |
+| | Size 2048 | Adapter shape |
 |---|---|---|
-| AWS's default settings | 905.5 µs, at the best | Do not run: illegal at this shape |
-| Spread between settings | 1.34x across all 75 | 7.14x across all 96 |
 | Settings within 2% of the best | 39 of 75 | 4 of 96 |
-| Do bigger blocks help? | Yes | No: large N blocks are the slowest |
+| Spread between settings | 1.34x | 7.14x |
+| AWS's default settings | At the best | Do not run: illegal at this shape |
+| Random choice, runs within 2% | 200 of 200 | 69 of 200 |
+| Model arms (raw, template, checker v1), runs within 2% | 9 of 10 each | 0 of 10 each |
+| Checker v2 | **TBD** | **TBD** |
 
-> "The rule that worked at one shape is wrong at the next. That is why this needs a loop that
-> measures, and not a table of good settings."
+> "On the easy shape everything works, including guessing. On the hard shape our models lost to
+> guessing. The checker model kept saying 'increase N to 24' after the chip had shown that was 2.6x
+> slower. Two thirds of its attempts were repeats or illegal values."
+
+*Draft 1 continues:* "So we stopped showing it raw numbers and showed it comparisons: 'raising N
+from 2 to 24: 1,572 to 4,112 microseconds, 2.62x slower'. Same model. Result: **TBD**."
+
+*Draft 2 continues:* "We changed the feedback and it still did not beat random (**TBD**). For a
+space of about a hundred settings, sampling against a real-chip checker is the right tool."
 
 ## 2:25 — From a kernel to a model
 
-One slide: the per-layer table from `docs/note.md` section 5.5.
+Two slides' worth, pick by time.
 
-> "A model is mostly matrix multiplies. Qwen3-8B's config gives five distinct shapes. At 512
-> tokens, AWS's default settings run on none of them. The loop tuned **TBD** of the five on the
-> chip."
+**The model's layers.** Qwen3-8B's config gives four distinct matmul shapes. At 512 tokens AWS's
+default settings run on none of them. One loop run per shape improved all four, by 1.14x to 1.31x.
+Summed over the model's 252 projections: 434.1 ms to 370.9 ms, 14.6% less. Say that this is a sum of
+standalone kernel times, not a model run.
 
-Say that the legality column is computed from the config, and that the model is not running on
-these kernels yet.
+**Real inference time.** We put the kernel inside a traced model on the chip and timed it.
+
+| 36-layer stack, 2048 wide | Inference time |
+|---|---|
+| Our kernel, unblocked | 35.56 ms |
+| Our kernel, the loop's setting | 33.01 ms (7.2% faster) |
+| AWS's compiler, no hand-written kernel | 33.00 ms |
+
+> "Tuning takes inference from 35.6 to 33.0 milliseconds, which is exactly where AWS's own compiler
+> lands. On a layer where settings matter more, a good setting is 4.3x faster than a bad one, and
+> the compiler is still 28% ahead, because it can fuse across operations and a hand-written kernel
+> cannot. We tie the compiler at best. We do not beat it."
 
 ## 2:40 — The honest claim, and close
 
 - We did not beat AWS's engineers. The kernel is theirs; the loop finds good settings for it.
 - At 2048 the 1.34x is from the slowest setting, and AWS's default is already at the best. The adapter shape is where no default exists.
 - One operation, **TBD** shape(s). We have not shown it carries over to others.
-- What we showed: two small models, with the chip as judge, produce a measured speed-up on real silicon with nobody in the loop.
+- At the hard shape, the first version of the loop lost to random choice. We say so.
+- What we showed: a checker that measures on the real chip, full ground truth at two shapes, and tuned settings that bring a hand-written kernel to compiler-level inference time with nobody in the loop.
 
 > "The same loop could sit next to any kernel nobody has time to hand-tune. Real-time video, where
 > every microsecond per frame counts, is where we would point it next."
@@ -123,14 +124,16 @@ these kernels yet.
 
 | Question | Answer |
 |---|---|
-| Why not grid search or random search? | At 2048 you could: we measured all 75 settings and random matched the models. We ran it as an arm and report it. At the adapter shape only 4 of 96 settings are good; our result there is **TBD**. |
+| Why not grid search or random search? | For spaces this small you should. We measured every setting at both shapes and ran random as an arm: it matched the models at 2048 and beat the first version of our loop at the adapter shape. Checker v2: **TBD**. |
 | Do the raw and template arms agree because they are right? | No. They made the same first move in all 10 runs and got stuck on the same start. The template sentence barely changed what the optimiser did. |
 | Is 1.34x a gain over what AWS ships? | No. At 2048 it is from the slowest setting; AWS's default measures 905.5 µs against a best of 904.7. At the adapter shape AWS's default does not run at all, and that is where tuning is needed. |
 | Why do the runs start from different settings? | The served model answers the same prompt almost identically each time, so repeats from one start are not independent. Each run starts from a different one of the 10 slowest settings. |
 | How is this different from `neuron-explorer recommend`? | We ran it in print-only mode. It is Bedrock-powered, sends a 155,604-character prompt, and is told not to give code. It advises a person. Ours is an 8B model with a prompt of about 1,200 to 3,000 characters that changes the kernel and measures again. |
 | Do the models write the kernel? | No. They choose three block-size settings; code applies them. |
-| Did you make the model itself faster? | Not measured. We tuned standalone kernels at the model's layer shapes. Summed over its 252 projections at 512 tokens, kernel time goes from **TBD** to **TBD**; that is a sum of standalone times, not a model run. A tokens-per-second number is the next step. |
-| Does your tuned kernel beat AWS's compiler? | *If the compiler wins or ties (expected):* No. A plain matmul from the compiler takes **TBD** against **TBD** for our tuned kernel. What the loop does is bring a hand-written kernel to compiler-level speed with nobody involved, and keep it away from settings that are up to 7x slower. *If ours wins:* give both numbers and say it is one shape. |
+| Did you make the model itself faster? | Not Qwen itself: its matmuls come from AWS's compiler, so our settings have nothing to plug into. In a traced 36-layer model that does use our kernel, tuning took inference from 35.56 to 33.01 ms. Summed over Qwen3-8B's 252 projections as standalone kernels, 434.1 to 370.9 ms. |
+| Does your tuned kernel beat AWS's compiler? | No. It ties it. Standalone at the adapter shape: 1,360.9 µs for ours against 1,355.1 for the compiler. In the 36-layer model: 33.01 ms against 33.00. Where the compiler can fuse the matmul with the next operation it is 28% ahead. What the loop does is bring a hand-written kernel to compiler-level speed with nobody involved. |
+| So why use a hand-written kernel at all? | Only where the compiler has no good answer: a new operation, or a fused pattern it does not find. We did not test such a case; matmul was the kernel we could measure completely in a day. |
+| Why did the models lose to random at the adapter shape? | The checker model reasoned from a rule ("bigger blocks cut data movement") against its own measurements, and the optimiser followed it. 66 of 100 attempts were repeats or illegal values. Random wastes none. |
 | Did the model just remember the AWS tutorial? | Possibly; the tutorial is public. Every model arm uses the same model, so differences between arms are not explained by memory. |
 | Is the checker a model or code? | Both. Code measures and rejects wrong kernels; an 8B model writes the instruction. The template arm shows what code alone does. |
 | How noisy are the timings? | Under 1% run to run on three captures. We treat anything smaller as no change. |

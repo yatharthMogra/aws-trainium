@@ -2,8 +2,9 @@
 
 Hack the Chip, NYU × Annapurna Labs. Track: kernel optimisation. Seats 205–209.
 
-> Status: everything at size 2048 is final, and the adapter-shape grid is measured. Arm results at
-> the adapter shape and the per-layer runs are in progress. Every `TBD` is a placeholder.
+> Status: all four original arms are final at both shapes, and the per-layer runs and in-model
+> inference times are measured. A redesigned checker (v2) is still running. Every `TBD` is a
+> placeholder.
 
 ## 1. What we built
 
@@ -193,12 +194,30 @@ starts are not the 10 slowest, because that would begin every run in the worst c
 spread evenly by rank through the slowest 90% of the grid, from 4/24/1 (9,717 µs) to 16/2/2
 (1,496 µs). Headline metrics: final time, and runs ending within 2% and within 10% of the best.
 
-| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of best | Runs within 10% of best | Rejected: duplicate | Rejected: compile |
-|---|---|---|---|---|---|---|---|
-| Random | 10 | 1,380.0 | 1,360.9 to 1,559.8 | TBD | TBD | TBD | TBD |
-| Raw profile | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Template | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Checker | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of best | Rejected: duplicate | Rejected: compile |
+|---|---|---|---|---|---|---|
+| Random, 200 runs (the baseline to quote) | 200 | 1,460.8 | worst 1,937.6 | 69 of 200 (34.5%) | 0 | 0 |
+| Random, first 10 runs (a lucky sample) | 10 | 1,370.5 | 1,360.9 to 1,559.8 | 7 of 10 | 0 | 0 |
+| Raw profile | 10 | 1,906.9 | 1,495.6 to 2,535.2 | 0 of 10 | 51 | 13 |
+| Template | 10 | 1,906.9 | 1,495.6 to 2,958.4 | 0 of 10 | 77 | 0 |
+| Checker (v1) | 10 | 2,284.8 | 1,495.6 to 3,114.8 | 0 of 10 | 43 | 23 |
+| Checker v2 | TBD | TBD | TBD | TBD | TBD | TBD |
+
+Grid best is 1,360.9 µs, so "within 2%" means 1,388.1 µs or faster. The random arm was rerun 200
+times over the same starts using the cached grid, because the first 10 runs happened to do better
+than random usually does.
+
+**Reading: at this shape the three model arms lost to random choice.**
+- Every model run ended faster than its own start, but none got within 2% of the best. Random does so about one time in three, and its median final time is 1,460.8 µs against 1,906.9 to 2,284.8 for the model arms.
+- **The checker model argued from a rule of thumb against its own measurements.** In one run the start was 1/2/1 at 1,572 µs. The checker said "Change N to 24 ... reduces data movement busy time". The result was 4,112 µs. It then proposed N=12 (3,462 µs), N=18 and N=16 (both illegal), then N=24 again, and never went back below N=2. Another run proposed N=24 seven times in a row.
+- 66 of the checker arm's 100 attempts produced no measurement: 43 repeats and 23 illegal values.
+- For comparison, 200 random runs at size 2048: median 905.2 µs, worst 913.5, 200 of 200 within 2%.
+
+**Checker v2 (running).** Same Qwen3-8B. Instead of raw profile lines it is shown comparisons worked
+out in code from the attempts so far, for example "raising N from 2 to 24 (with M=1, K=1): 1572 ->
+4112 microseconds, 2.62x SLOWER", plus the best so far, the legal values for each setting, the list
+already tried, and the sentence "Trust the measured lines over any general rule". This is the
+workshop's own lesson applied to our loop: change the feedback, not the model. Result: `TBD`.
 
 **Other shapes tried.**
 - *Qwen3-8B's feed-forward projection* (K=4096, M=512, N=12288): mostly flat. In a partial grid (41 of 144 settings measured), 34 ran and 7 overflowed the on-chip buffer. Of the 34, the best is 2,663.6 µs and 28 are within 2% of it, with one bad outlier at 5,626.3 µs. AWS's default is illegal here too (M=512 is 4 tiles; it needs M divisible by 2048). Not used for the arms.
@@ -211,13 +230,18 @@ width. So a model's config gives the list of matmul shapes the loop would have t
 Qwen3-8B (hidden 4096, intermediate 12288, 32 heads and 8 key-value heads of width 128, 36 layers),
 at 512 tokens:
 
-| Layer | Shape (K / M / N) | Per layer × layers | Legal settings | AWS default 16/2/8 | Measured on the chip |
+| Layer | Shape (K / M / N) | Per layer × layers | Legal settings | AWS default 16/2/8 | Loop result, from 1/1/1 |
 |---|---|---|---|---|---|
-| Attention query and output projections | 4096 / 512 / 4096 | 2 × 36 | 72 | Illegal | `TBD` |
-| Attention key and value projections | 4096 / 512 / 1024 | 2 × 36 | 36 | Illegal | `TBD` |
-| Feed-forward gate and up projections | 4096 / 512 / 12288 | 2 × 36 | 144 | Illegal | Mostly flat: 28 of 34 settings within 2% of the best, 2,663.6 µs (partial grid) |
-| Feed-forward down projection | 12288 / 512 / 4096 | 1 × 36 | 144 | Illegal | `TBD` |
-| Rank-256 adapter weight product | 256 / 4096 / 12288 | not in the base model | 96 | Illegal | 7.14x spread over the full grid; best 1,360.9 µs |
+| Attention query and output projections | 4096 / 512 / 4096 | 2 × 36 | 72 | Illegal | 1,075.3 → 906.2 µs at 4/4/8 (1.19x) |
+| Attention key and value projections | 4096 / 512 / 1024 | 2 × 36 | 36 | Illegal | 321.4 → 245.0 µs at 2/2/16 (1.31x) |
+| Feed-forward gate and up projections | 4096 / 512 / 12288 | 2 × 36 | 144 | Illegal | 3,117.5 → 2,667.2 µs at 1/8/2 (1.17x) |
+| Feed-forward down projection | 12288 / 512 / 4096 | 1 × 36 | 144 | Illegal | 3,029.1 → 2,664.7 µs at 1/4/1 (1.14x) |
+| Rank-256 adapter weight product | 256 / 4096 / 12288 | not in the base model | 96 | Illegal | See section 5.4: the model arms lost to random here |
+
+The loop column is one checker (v1) run of 10 attempts per shape, measured live on the chip with
+three captures each (`runs/layer_*.jsonl`). The loop improved all four base-model shapes. Only the
+gate/up shape has a grid to compare against (partial, best 2,663.6 µs, so 2,667.2 is within 0.2%);
+for the other three we do not know how close to the best these are.
 
 The shape, settings-count and legality columns are **computed from the config and the kernel's own
 rules, not measured**. What they show: at 512 tokens, AWS's tutorial default runs on none of this
@@ -229,38 +253,70 @@ Limits of this table:
 - These are float32 standalone kernels at the model's shapes. The model itself is not running on them, so there is no tokens-per-second number.
 - The adapter row's M=4096 is a weight-product dimension, not a token count.
 
-In progress: one checker-arm run of 10 attempts from 1/1/1 at each of the four base-model shapes,
-measured live on the chip. Results: `TBD`.
-
 ### 5.6 Towards the model's own speed
 
-Two figures, neither of which is a model run. No tokens-per-second number is possible today: the
-served model's matmuls are generated by AWS's compiler from the whole graph, so the settings this
-loop tunes have nothing to plug into without replacing a layer and recompiling the model.
+No tokens-per-second number for Qwen3-8B is possible today: the served model's matmuls are
+generated by AWS's compiler from the whole graph, so the settings this loop tunes have nothing to
+plug into without replacing layers and recompiling the model. Three measurements get as close as we
+could.
 
-**Sum over the model's projections.** Qwen3-8B has 252 linear projections (query, key, value,
+**(a) Sum over the model's projections.** Qwen3-8B has 252 linear projections (query, key, value,
 output, gate, up and down, in each of 36 layers). Adding up the standalone kernel time for each at
-512 tokens gives one figure before tuning and one after. This is a sum of float32 standalone kernel
-times, not a measured forward pass.
+512 tokens, from the per-layer runs above:
 
 | | Sum over 252 projections |
 |---|---|
-| Unblocked settings (1/1/1) | `TBD` |
-| The loop's settings | `TBD` |
+| Unblocked settings (1/1/1) | 434.1 ms |
+| The loop's settings | 370.9 ms (1.17x, 14.6% less) |
 
-**Against the compiler.** One plain matmul at a Qwen3-8B layer shape, compiled by the standard
-compiler with no NKI kernel, profiled with the same tool as our kernels. Same shape, float32.
+This is a sum of float32 standalone kernel times, not a measured forward pass.
 
-| Variant | Time (µs) |
-|---|---|
-| Compiler default | `TBD` |
-| Our kernel, a bad setting | `TBD` |
-| Our kernel, the loop's setting | `TBD` |
+**(b) The kernel inside a traced model, timed as inference.** We put the kernel into small models
+traced with `torch_neuronx` and ran them on one NeuronCore. "Inference time" is wall clock per call
+(median of 50, after 5 warm-ups); "on chip" is the hardware profile (median of 3 captures). All
+outputs were checked against CPU (relative error under 3e-6). Scripts and raw results:
+`inference/`.
 
-We expect the compiler default to match or beat the tuned kernel, because at the best settings the
-tensor engine is already 97–99% busy. If it does, the claim is that the loop brings a hand-written
-kernel to compiler-level speed automatically, not that it beats the compiler. If the compile does
-not work against the pod's driver, this table is replaced by the failure: `TBD`.
+*A 36-layer stack of 2048 × 2048 matmuls, then a mean.* Data stays on the chip between layers.
+
+| Matmul in each layer | Inference time (ms) | On chip (µs) |
+|---|---|---|
+| Our kernel, unblocked 1/1/1 | 35.556 | profile capture failed |
+| Our kernel, the loop's setting 4/2/4 | 33.011 | 31,724.6 |
+| Our kernel, AWS tutorial default 16/2/8 | 33.025 | 31,735.6 |
+| Compiler default (no hand-written kernel) | 33.004 | 31,726.4 |
+
+The loop's setting cuts inference time by 7.2% against the unblocked kernel, and lands on the
+compiler's own time to within 0.02%.
+
+*One adapter-shape layer (K=256, M=4096, N=12288), then a mean.*
+
+| Matmul | Inference time (ms) | On chip (µs) |
+|---|---|---|
+| Our kernel, worst setting 4/24/1 | 10.627 | 10,281.3 |
+| Our kernel, unblocked 1/1/1 | 2.627 | 2,428.3 |
+| Our kernel, best setting 4/1/2 | 2.471 | 2,116.1 |
+| Compiler default | 1.773 | 1,402.4 |
+
+A good setting makes this model 4.3x faster than the worst one. The compiler default is a further
+28% faster than our best. The profile shows why: the compiler fuses the matmul with the mean and
+moves 16.9 MB, while our kernel writes its full result out and the mean reads it back, moving
+516 MB. A hand-written kernel is a boundary the compiler cannot fuse across.
+
+**(c) The same layer alone, against the compiler.** Adapter shape, no pooling, on-chip time:
+compiler default 1,355.1 µs; our kernel at 4/1/2 called inside a traced model 1,460.3 µs; our
+kernel at 4/1/2 standalone (grid best) 1,360.9 µs. So standalone, the tuned kernel ties the
+compiler (0.4%); embedded in a traced model it is about 7% slower.
+
+**What this adds up to.** Tuning the settings does reduce inference time in a model that uses this
+kernel, by 7% to 4.3x depending on how bad the starting setting is. It does not beat what AWS's
+compiler produces on its own for a plain matmul: it ties it at best. The loop's value is bringing a
+hand-written kernel to compiler-level speed without a person, for the cases where a hand-written
+kernel is needed at all.
+
+Note on where (b) and (c) were measured: seat 170, in a separate Python environment with
+`torch_neuronx` 2.9 (the pod's own environment does not have it). Three fixes were needed and are
+recorded in `inference/README.md`.
 
 ### 5.7 What went wrong along the way
 
@@ -277,7 +333,8 @@ not work against the pod's driver, this table is replaced by the failure: `TBD`.
 
 ## 7. What we do not claim
 
-- We do not beat AWS's engineers. The kernel is theirs; the loop finds good settings for it.
+- We do not beat AWS's engineers or AWS's compiler. The kernel is theirs; the loop finds good settings for it, and at best that ties the compiler's plain matmul.
+- At the adapter shape, the first version of our model-driven loop did worse than random choice.
 - The models do not write kernel code. They choose three numbers.
 - One operation and one dtype, at two shapes. Nothing here shows the loop transfers to other kernels.
 - At 2048, the 1.34x is measured from the slowest setting. AWS's tutorial default is already within 0.1% of the best there.
