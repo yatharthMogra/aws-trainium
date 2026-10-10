@@ -7,7 +7,7 @@ settings and log stages are already agreed and written into the note.
 
 1. Full grid at 2048: received and written into the note.
 2. **Per arm (random, raw profile, template, checker), from `results/summary.json`:** runs completed; median, minimum and maximum final time; runs ending within 2% of grid best; median attempts to get within 2%; median time after 3 attempts; attempts lost to `compile`, `unreadable` and `duplicate`.
-3. **Second shape** (K=4096, M=512, N=12288), if it lands: the same grid facts and per-arm numbers.
+3. **Adapter shape** (K=256, M=4096, N=12288): the full grid of 96 (best, worst, share within 2% of best, count failing to compile), the exact assertion text for AWS's 16/2/8, the starts used, and per-arm numbers.
 
 ## Files
 

@@ -153,13 +153,39 @@ From the first pass, starting at 1/1/1, real chip numbers. Settings are M/N/K.
 
 In attempt 7 the checker model ignored a limit it had been told. The chip-side check caught it.
 
-### 5.4 Second shape
+### 5.4 Second shape: one AWS's defaults do not cover
 
-Qwen3-8B's own feed-forward projection: K=4096, M=512 (512 tokens), N=12288, with the hidden and
-intermediate sizes read from the model's config on the pod. 144 legal settings. Results: `TBD`.
+K=256, M=4096, N=12288, float32: a rank-256 adapter-style matmul onto Qwen3-8B's 12288-wide
+feed-forward dimension (4096 and 12288 are read from the model's config on the pod). 96 legal
+settings.
 
-We first tried square 4096. A three-setting probe gave 10,092.8 µs at 1/1/1 and 7,062.0 µs at
-4/2/4, about 1.43x, but the full grid was too slow to finish in the day.
+**AWS's tutorial default (16/2/8) does not run here.** It is illegal by the kernel's own
+assertions: K=256 is 2 tiles and the default needs K divisible by 1024. So there is no shipped
+setting to fall back on at this shape.
+
+**Probe of 8 settings** on the chip (seat 209, two captures each, all correct). The full grid of 96
+is `TBD`.
+
+| Setting (M/N/K) | Time (µs) | Tensor engine busy |
+|---|---|---|
+| 16/2/2 | 1,495.6 | 91.1% |
+| 32/1/2 | 1,501.4 | 91.2% |
+| 4/2/1 | 1,540.7 | 90.3% |
+| 1/1/1 | 1,629.2 | 87.4% |
+| 1/24/2 | 2,938.6 | 48.4% |
+| 32/4/1 | 2,977.7 | 57.4% |
+| 8/24/1 | 3,905.6 | 44.8% |
+| 32/24/2 | 7,278.5 | 31.4% |
+
+- Within these 8 settings the spread is 4.9x. At 2048 the whole grid spans 1.34x.
+- "Bigger blocks are better" held at 2048 and is badly wrong here: the largest blocks are the slowest.
+- The unblocked start (1/1/1) is already near the good region. So the question at this shape is not how much faster than the start, but whether an arm avoids the settings that cost up to 4.9x.
+
+Arm results at this shape: `TBD`.
+
+**Other shapes tried.**
+- *Qwen3-8B's feed-forward projection* (K=4096, M=512, N=12288): compute-limited whatever the settings. In a partial grid (about 20 of 144 settings), every setting that ran landed between 2,666 and 2,724 µs with the tensor engine 98–99% busy. AWS's default is illegal here too (M=512 is 4 tiles; it needs M divisible by 2048). Not used for the arms.
+- *Square 4096:* a three-setting probe gave 10,092.8 µs at 1/1/1 and 7,062.0 µs at 4/2/4, about 1.43x, but the full grid was too slow to finish in the day.
 
 ### 5.5 What went wrong along the way
 
@@ -178,6 +204,6 @@ We first tried square 4096. A three-setting probe gave 10,092.8 µs at 1/1/1 and
 
 - We do not beat AWS's engineers. The kernel is theirs; the loop finds good settings for it.
 - The models do not write kernel code. They choose three numbers.
-- One operation and one dtype, at one shape so far (`TBD` if the second shape lands). Nothing here shows the loop transfers to other kernels.
-- The 1.34x is measured from the slowest setting. AWS's tutorial default is already within 0.1% of the best.
+- One operation and one dtype, at two shapes. Nothing here shows the loop transfers to other kernels.
+- At 2048, the 1.34x is measured from the slowest setting. AWS's tutorial default is already within 0.1% of the best there.
 - The tutorial kernel is public, so Qwen3-8B may have seen its default settings in training. The comparison between arms is still fair, because every model arm uses the same model.

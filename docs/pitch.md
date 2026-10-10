@@ -5,6 +5,8 @@ that is not in `docs/note.md`.
 
 ## 0:00 — The opening (pick one once results are in)
 
+Not chosen yet. Size 2048 points to A. The adapter shape may point to B.
+
 **A. The loop sped the kernel up, and random search did about as well.** Expected at size 2048.
 
 > "We built a loop of two 8-billion-parameter models that tunes a matmul kernel on Trainium2 with
@@ -16,9 +18,10 @@ Then go to the method, then "What the checker caught", then the arm comparison a
 
 **B. The checker's instruction clearly beat the other arms.** Possible on the second shape.
 
-> "Same small model, same kernel, same number of attempts. With raw profile numbers it reached
-> **TBD**. With one sentence from our checker it reached **TBD**. The feedback is what made the
-> difference."
+> "AWS ships good settings for this kernel at one shape. Move to a shape from a real model's
+> adapter layer and those settings do not even run, and a wrong choice costs up to 4.9x. Same
+> small model, same number of attempts: with raw profile numbers it reached **TBD**. With one
+> sentence from our checker it reached **TBD**."
 
 Then the method, then the chart, then "What the checker caught".
 
@@ -83,10 +86,21 @@ with the grid best as a dashed line.
 
 *If they do separate (opening B):* give the two numbers and the number of runs.
 
+Either way, show the adapter-shape contrast (probe of 8 settings so far, full grid **TBD**):
+
+| | Size 2048 | Adapter shape (K=256, M=4096, N=12288) |
+|---|---|---|
+| AWS's default settings | 905.5 µs, at the best | Do not run: illegal at this shape |
+| Spread between settings | 1.34x across all 75 | 4.9x across the first 8 measured |
+| Do bigger blocks help? | Yes | No: the largest blocks are the slowest |
+
+> "The rule that worked at one shape is wrong at the next. That is why this needs a loop that
+> measures, and not a table of good settings."
+
 ## 2:40 — The honest claim, and close
 
 - We did not beat AWS's engineers. The kernel is theirs; the loop finds good settings for it.
-- The 1.34x is from the slowest setting. AWS's default setting is already at the best.
+- At 2048 the 1.34x is from the slowest setting, and AWS's default is already at the best. The adapter shape is where no default exists.
 - One operation, **TBD** shape(s). We have not shown it carries over to others.
 - What we showed: two small models, with the chip as judge, produce a measured speed-up on real silicon with nobody in the loop.
 
@@ -98,7 +112,7 @@ with the grid best as a dashed line.
 | Question | Answer |
 |---|---|
 | Why not grid search or random search? | At 2048 you could: we measured all 75 settings and random does well. We ran it as an arm and report it. The loop's case is larger spaces; our second-shape result is **TBD**. |
-| Is 1.34x a gain over what AWS ships? | No. It is from the slowest setting. AWS's tutorial default measures 905.5 µs against a best of 904.7. |
+| Is 1.34x a gain over what AWS ships? | No. At 2048 it is from the slowest setting; AWS's default measures 905.5 µs against a best of 904.7. At the adapter shape AWS's default does not run at all, and that is where tuning is needed. |
 | Why do the runs start from different settings? | The served model answers the same prompt almost identically each time, so repeats from one start are not independent. Each run starts from a different one of the 10 slowest settings. |
 | How is this different from `neuron-explorer recommend`? | We ran it in print-only mode. It is Bedrock-powered, sends a 155,604-character prompt, and is told not to give code. It advises a person. Ours is an 8B model with a prompt of about 1,200 to 3,000 characters that changes the kernel and measures again. |
 | Do the models write the kernel? | No. They choose three block-size settings; code applies them. |
