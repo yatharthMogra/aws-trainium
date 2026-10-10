@@ -2,8 +2,8 @@
 
 Hack the Chip, NYU × Annapurna Labs. Track: kernel optimisation. Seats 205–209.
 
-> Status: sections 1–4 are measured. Section 5 (the agent loop) is running; every `TBD` is a
-> placeholder, not a result.
+> Status: sections 1–4 and the grid in section 5 are measured. The arm runs are in progress; every
+> `TBD` is a placeholder, not a result.
 
 ## 1. What we built
 
@@ -38,7 +38,9 @@ chip gets a time.
 
 After a timed attempt, the checker model sees one line of raw numbers (time, compute engine busy,
 data movement busy, bytes moved against the minimum, transfer count, average transfer size) and
-writes one instruction. Its prompt and the optimiser's are each under 1,500 characters.
+writes one instruction. Its prompt is about 1,200 characters on the first attempt and about 3,000
+on the tenth, because it includes every earlier attempt's profile line. The optimiser's prompt is
+similar or smaller.
 
 All chip measurements are at LNC=1 (one physical core). At the pod's default LNC=2 the kernel runs
 on both physical cores and every count doubles; our first profile was wrong for this reason.
@@ -82,24 +84,39 @@ hardware at toy sizes.
 
 **Three things in the pod differ from the docs.**
 - LNC=2 doubles every profile count (above).
-- The README says two cores stay free beside the model server; the runtime reports "cores busy".
+- The README says two cores stay free beside the model server. On seat 205 with the server fully up, every core request was refused with "cores busy", at LNC=2 and at LNC=1.
 - The AWS toolkit's profiling recipe needs `torch_neuronx`, which the pod lacks. NKI standalone mode with NumPy inputs works instead.
 
 **How this differs from AWS's own recommendation tool.** `neuron-explorer recommend` exists on the
 pod. In print-only mode on our kernel's profile, its banner says "AWS Bedrock-powered", its prompt
 is 155,604 characters (it includes the whole NKI performance guide), and it asks for two or three
 written recommendations with the instruction "Please do not give code or pseudocode". That is a
-hosted large model advising a person. Ours is an 8B model with a prompt under 1,500 characters that
-changes the kernel and measures again. We did not run theirs end to end, because it needs a Bedrock
+hosted large model advising a person. Ours is an 8B model with a prompt of about 1,200 to 3,000
+characters that changes the kernel and measures again. We did not run theirs end to end, because it needs a Bedrock
 call.
 
 ## 5. The agent loop: results
 
-**Start:** the blocked kernel with all three settings at 1, about 1,209 µs (1,207.5 and 1,209.3 in
-two measurements). **Yardstick:** the best setting in the full grid of 75, about 905 µs
-(`TBD final`), which is 1.34x faster (`TBD final`).
+### 5.1 The full grid at 2048 (measured)
 
-Every arm starts from the same setting and gets 10 attempts per run. 10 runs per arm are planned.
+All 75 legal settings, each measured on the chip with three captures.
+Data: `results/grid_2048.jsonl`.
+
+| Fact | Value |
+|---|---|
+| Settings that ran correctly | 74 of 75 (one, 16/4/16, overflowed the on-chip buffer at compile) |
+| Slowest setting, 1/1/1 | 1,209.3 µs |
+| Best setting, 4/2/4 | 904.7 µs, 1.34x faster than the slowest |
+| Median setting | 919.7 µs |
+| AWS's tutorial default, 16/2/8 | 905.5 µs |
+| Settings within 1% / 2% / 5% of the best | 26 / 39 / 58 of 75 |
+
+**Read this before the arm results.** The landscape is very forgiving. More than half of all
+settings are within 2% of the best, and AWS's default is already there. So the 1.34x is the gain
+from the worst setting, not from what AWS ships, and random choice is expected to find a good
+setting in a few attempts at this shape.
+
+### 5.2 The arms
 
 | Arm | What chooses the next setting |
 |---|---|
@@ -108,17 +125,45 @@ Every arm starts from the same setting and gets 10 attempts per run. 10 runs per
 | Template | Optimiser model plus a fixed, code-written sentence built from the profile |
 | Checker | Optimiser model plus the checker model's instruction |
 
-| Arm | Runs | Median final time (µs) | Range (µs) | Median speed-up | Runs within 2% of grid best | Median attempts to get within 2% | Median time after 3 attempts (µs) | Attempts lost to compile failures |
-|---|---|---|---|---|---|---|---|---|
-| Random | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Raw profile | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Template | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| Checker | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-
-- **What to expect at this size.** In a partial grid (26 of 75 settings), about a third of settings were within 2% of the best. If that holds for the full grid (`TBD`), random choice will also land near the best within a few attempts, and the arms may not separate on final time. We report that as it comes out.
-- **Second shape, 4096 × 4096:** `TBD`. The space is larger and more settings overflow the on-chip buffer, so it is the better test of whether the checker's instruction matters.
+- **10 runs per arm, 10 attempts per run.** Each run starts from a different one of the 10 slowest settings on the grid (1,209.3 down to 968.1 µs). Every arm uses the same 10 starts.
+- **Why different starts.** Repeating a run from the same start is not independent: the served model answers the same prompt almost identically each time. Two checker runs from 1/1/1 matched for seven attempts.
 - **Settings:** Qwen3-8B for both agents, temperature 0.6, top_p 0.95, thinking off, 8,192-token server context. Chip measurements are cached per setting (three captures, median).
-- **Attempt logs,** every attempt with its stage and score: `runs/<arm>.jsonl`. Grid: `results/grid_2048.jsonl`. Summary and chart: `results/summary.json`, `results/curve.csv`, `results/curve.png`.
+
+| Arm | Runs | Median final time (µs) | Range (µs) | Runs within 2% of grid best | Median attempts to get within 2% | Median time after 3 attempts (µs) | Attempts lost to compile failures |
+|---|---|---|---|---|---|---|---|
+| Random | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Raw profile | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Template | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| Checker | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+Attempt logs, every attempt with its stage and score: `runs/<arm>_2048_v2.jsonl`. Summary and
+chart: `results/summary.json`, `results/curve.csv`, `results/curve.png`.
+
+### 5.3 One real exchange
+
+From the first pass, starting at 1/1/1, real chip numbers. Settings are M/N/K.
+
+| Attempt | Checker's instruction | Optimiser chose | Result |
+|---|---|---|---|
+| 1 | "Change M to 2 ... the current setting results in 1152 transfers" | 2/1/1 | 969.1 µs |
+| 2 | "Change N to 2, increasing the number of 512-wide tiles loaded per transfer. This reduces data movement busy time" | 2/2/2 | 943.8 µs |
+| 3 | "Increase N to 4" | 2/4/2 | 916.6 µs |
+| 6 | (not recorded here) | 2/4/4 | 906.6 µs |
+| 7 | "Increase N to 8, since the current N=4 is already dividing 4 (as required)" | 2/8/8 | Rejected at compile: N=8 is not a legal value |
+
+In attempt 7 the checker model ignored a limit it had been told. The chip-side check caught it.
+
+### 5.4 Second shape
+
+Qwen3-8B's own feed-forward projection: K=4096, M=512 (512 tokens), N=12288, with the hidden and
+intermediate sizes read from the model's config on the pod. 144 legal settings. Results: `TBD`.
+
+We first tried square 4096. A three-setting probe gave 10,092.8 µs at 1/1/1 and 7,062.0 µs at
+4/2/4, about 1.43x, but the full grid was too slow to finish in the day.
+
+### 5.5 What went wrong along the way
+
+- The first pass of arm runs was cut short when the model server died, and is not quoted in the results table. The cause was ours: a request that included a `seed` parameter. The server was restarted and the loop does not send one.
 
 ## 6. Which numbers are which
 
@@ -133,5 +178,6 @@ Every arm starts from the same setting and gets 10 attempts per run. 10 runs per
 
 - We do not beat AWS's engineers. The kernel is theirs; the loop finds good settings for it.
 - The models do not write kernel code. They choose three numbers.
-- One operation and one dtype, at one shape so far (`TBD` if 4096 lands). Nothing here shows the loop transfers to other kernels.
+- One operation and one dtype, at one shape so far (`TBD` if the second shape lands). Nothing here shows the loop transfers to other kernels.
+- The 1.34x is measured from the slowest setting. AWS's tutorial default is already within 0.1% of the best.
 - The tutorial kernel is public, so Qwen3-8B may have seen its default settings in training. The comparison between arms is still fair, because every model arm uses the same model.

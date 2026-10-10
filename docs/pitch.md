@@ -8,13 +8,13 @@ that is not in `docs/note.md`.
 **A. The loop sped the kernel up, and random search did about as well.** Expected at size 2048.
 
 > "We built a loop of two 8-billion-parameter models that tunes a matmul kernel on Trainium2 with
-> no human involved. It took the kernel from about 1,209 microseconds to **TBD**, **TBDx faster**,
-> measured on the real chip. And building the checker for it turned up two things about measuring
-> on this chip that we did not expect."
+> no human involved. From the slowest setting, 1,209 microseconds, it reached **TBD**, against a
+> best possible of 905, measured on the real chip. And building the checker for it turned up
+> things about measuring on this chip that we did not expect."
 
 Then go to the method, then "What the checker caught", then the arm comparison as an honest null.
 
-**B. The checker's instruction clearly beat the other arms.** Possible at size 4096.
+**B. The checker's instruction clearly beat the other arms.** Possible on the second shape.
 
 > "Same small model, same kernel, same number of attempts. With raw profile numbers it reached
 > **TBD**. With one sentence from our checker it reached **TBD**. The feedback is what made the
@@ -37,6 +37,15 @@ Three roles, as our mentor asked for.
 
 Say this plainly: the models choose three numbers; they do not write kernel code.
 
+A real exchange to read out (settings are M/N/K):
+
+| Checker said | Optimiser chose | Time |
+|---|---|---|
+| (start) | 1/1/1 | 1,209 µs |
+| "Change M to 2 ... the current setting results in 1152 transfers" | 2/1/1 | 969 µs |
+| "Change N to 2 ... This reduces data movement busy time" | 2/2/2 | 944 µs |
+| "Increase N to 4" | 2/4/2 | 917 µs |
+
 One line to land: *"The chip already knows why a kernel is slow. The checker's job is to say it in
 a sentence a small model can act on."*
 
@@ -47,8 +56,10 @@ Two findings from building the on-chip measurement, both measured.
 - **The simulator and the chip disagree.** On two of four small shapes the simulator counts wasted re-reads (3.7 MB and 7.3 MB) where the chip moved the minimum (2.4 MB and 3.7 MB). The hackathon's own optimisation levels are scored on the simulator, so an agent could lower that score without changing anything on hardware. At size 2048 the waste is real, which is why we optimise there.
 - **The pod's default core setting doubles every profile count.** Our first profile said the kernel moved twice the data it needed. It did not; it ran on two physical cores. We measure on one.
 
-> "A checker that is confidently wrong sends the agent in the wrong direction. Ours was, once, and
-> the chip is how we found out."
+- **The small checker model also gets things wrong, and the chip catches it.** On attempt 7 it said "Increase N to 8", which is not a legal value. The compile step rejected it.
+
+> "A checker that is confidently wrong sends the agent in the wrong direction. Ours was, more than
+> once, and the chip is how we found out."
 
 ## 2:00 — The comparison
 
@@ -64,16 +75,18 @@ with the grid best as a dashed line.
 
 *If the arms do not separate (opening A):*
 
-> "At this size, about a third of all settings are within 2% of the best, so random search finds a
-> good one in a few tries. The models matched it; they did not beat it. Where they differ is
-> **TBD** (attempts to get within 2%, result after three attempts, attempts lost to compile
-> failures). At 4096, where the space is harder, **TBD**."
+> "We measured all 75 settings. 39 of them are within 2% of the best, and AWS's own default is one
+> of those. So random search finds a good one in a few tries. The models matched it; they did not
+> beat it. Where they differ is **TBD** (attempts to get within 2%, result after three attempts,
+> attempts lost to compile failures). On our second shape, the feed-forward layer of the model
+> itself, **TBD**."
 
 *If they do separate (opening B):* give the two numbers and the number of runs.
 
 ## 2:40 — The honest claim, and close
 
 - We did not beat AWS's engineers. The kernel is theirs; the loop finds good settings for it.
+- The 1.34x is from the slowest setting. AWS's default setting is already at the best.
 - One operation, **TBD** shape(s). We have not shown it carries over to others.
 - What we showed: two small models, with the chip as judge, produce a measured speed-up on real silicon with nobody in the loop.
 
@@ -84,8 +97,10 @@ with the grid best as a dashed line.
 
 | Question | Answer |
 |---|---|
-| Why not grid search or random search? | At 2048 you could: the grid is 75 settings and random does well. We ran it as an arm and report it. The loop's case is larger spaces; our 4096 result is **TBD**. |
-| How is this different from `neuron-explorer recommend`? | We ran it in print-only mode. It is Bedrock-powered, sends a 155,604-character prompt, and is told not to give code. It advises a person. Ours is an 8B model with a prompt under 1,500 characters that changes the kernel and measures again. |
+| Why not grid search or random search? | At 2048 you could: we measured all 75 settings and random does well. We ran it as an arm and report it. The loop's case is larger spaces; our second-shape result is **TBD**. |
+| Is 1.34x a gain over what AWS ships? | No. It is from the slowest setting. AWS's tutorial default measures 905.5 µs against a best of 904.7. |
+| Why do the runs start from different settings? | The served model answers the same prompt almost identically each time, so repeats from one start are not independent. Each run starts from a different one of the 10 slowest settings. |
+| How is this different from `neuron-explorer recommend`? | We ran it in print-only mode. It is Bedrock-powered, sends a 155,604-character prompt, and is told not to give code. It advises a person. Ours is an 8B model with a prompt of about 1,200 to 3,000 characters that changes the kernel and measures again. |
 | Do the models write the kernel? | No. They choose three block-size settings; code applies them. |
 | Did the model just remember the AWS tutorial? | Possibly; the tutorial is public. Every model arm uses the same model, so differences between arms are not explained by memory. |
 | Is the checker a model or code? | Both. Code measures and rejects wrong kernels; an 8B model writes the instruction. The template arm shows what code alone does. |
