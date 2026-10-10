@@ -73,11 +73,20 @@ On the easy shape, 2048 square, everything works including guessing: 39 of 75 se
 | Plain PyTorch | 17.26 ms | 4.77 ms |
 
 > "With the settings our loop chose, inference time dropped 13.5%, level with PyTorch's own. At
-> 16-bit the spread between settings is 3.3 times, and the 32-bit answer no longer holds. Different
-> shape, different precision, different settings. That is why this has to be automatic."
+> 16-bit the 32-bit answer no longer holds, so we ran the loop again at 16-bit, scored on the
+> block's own inference time. Five runs, five different starts, as slow as 8.6 milliseconds. All
+> five ended between 2.86 and 2.89, about three times faster, within 5% of PyTorch at 2.75."
 
-Say that the 16-bit settings were found by hand from seven candidates, not by the loop, and that
-these are small models with random weights, not Qwen3-8B itself.
+| One feed-forward block, 16-bit, loop scored on inference time | |
+|---|---|
+| Slowest start | 8.63 ms |
+| Where the five loop runs ended | 2.86 to 2.89 ms |
+| Best of all 72 settings | 2.86 ms |
+| Plain PyTorch | 2.75 ms |
+
+Say that random choice also gets within 2% of the best in 83% of runs on this problem, so this is
+not evidence that the model beats random. Say that these are small models with random weights, not
+Qwen3-8B itself. The 16-bit column in the two-block table above is a hand-found setting.
 
 ## 2:30 — What the checker caught
 
@@ -96,14 +105,14 @@ Pick two, by time.
 
 > "We came to show that a small model could tune your chip. What we can show instead is exactly
 > what the model needs to be told, and that once you can say it that clearly, you may not need the
-> model. The next step is to point this at an operation the compiler does not already handle well,
-> and to run it at 16-bit, scored on the model's own inference time."
+> model. The next step is to point this at an operation the compiler does not already handle
+> well, where a hand-written kernel is actually needed."
 
 ## Likely questions
 
 | Question | Answer |
 |---|---|
-| Does your tuned kernel beat AWS's compiler? | No. It ties it at 32-bit (17.40 against 17.26 ms) and is about 5% behind at 16-bit (5.02 against 4.77 ms). Where the compiler can fuse the matmul with the next operation it is 28% ahead. |
+| Does your tuned kernel beat AWS's compiler? | No. It ties it at 32-bit (17.40 against 17.26 ms) and is about 5% behind at 16-bit (2.86 against 2.75 ms for one block). Where the compiler can fuse the matmul with the next operation it is 28% ahead. |
 | Then why use a hand-written kernel at all? | Only where the compiler has no good answer: a new operation, or a pattern it does not fuse. We did not test such a case; matmul was the kernel we could measure completely in a day. |
 | Why a model at all, if a rule does better? | On this problem, we would not. That is our finding. The model was the way we discovered what the rule needed to know. |
 | Does the model beat random? | It is more reliable: 29 of 30 runs within 10% of the best, against 73% for random. At finding the exact best it is 50% against 38%, which is not conclusive at 30 runs. |

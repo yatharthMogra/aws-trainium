@@ -22,7 +22,7 @@ measure real inference time.
 
 1. **The checker's design decides the outcome, not the model.** With the same 8B model and a redesigned checker, the share of runs ending within 10% of the best went from 3 of 30 to 29 of 30, and attempts that produced no measurement went from 217 of 300 to 0.
 2. **The model is not what adds value.** A fixed one-line rule choosing from the same measured menu, with no model, finds the best setting in 71% of runs. The model manages 50%, and random choice 38%.
-3. **Tuning the settings reduces real inference time, up to the level of AWS's own compiler and no further.** In a model built from Qwen3-8B's feed-forward block, the loop's settings cut inference time by 13.5%, level with plain PyTorch. At 16-bit precision the spread between settings is 3.3x and the 32-bit settings no longer hold.
+3. **Tuning the settings reduces real inference time, up to the level of AWS's own compiler and no further.** In a model built from Qwen3-8B's feed-forward block, the loop's settings cut inference time by 13.5% at 32-bit, level with plain PyTorch. Run directly at 16-bit and scored on the block's own inference time, the loop took it from as much as 8.63 ms down to 2.86–2.89 ms in all five runs, about 3x faster and within 5% of plain PyTorch at 16-bit. Random choice does almost as well on that problem.
 4. **Building the on-chip checker exposed things the documentation and the simulator get wrong** (section 4).
 
 **How many runs, and the spread.** Timings repeat to under 1% across three captures. Model arms:
@@ -243,7 +243,44 @@ seats; each table below comes from one seat.
 
 - **At 32-bit the loop's settings cut inference time by 13.5%** (20.12 → 17.40 ms), level with plain PyTorch (17.26 ms). This agrees with the 14.6% from the standalone sum in section 6.
 - **At 16-bit the spread between settings is 3.3x**, and the settings found at 32-bit are 1.7x off the retuned ones. The right settings change with precision as well as shape, which is the case for doing this automatically.
-- The 16-bit retune was a hand search over seven candidates on a one-block model, not the agent loop. Running the loop at 16-bit, scored on in-model time, is the next step.
+- The 16-bit retune in this table (4/4/4) was a hand search over seven candidates on a one-block model. The loop was then run at 16-bit itself; see the next table.
+
+**The loop itself at 16-bit, scored on in-model inference time (seats 170–174).**
+
+The team's loop code is used unchanged (checker v5, the menu, the optimiser edit check, the
+logging). Only the measurement is replaced: each attempt builds one Qwen3-8B feed-forward block
+(hidden 4096, intermediate 12288, 512 tokens) with all three matmuls using the kernel at the
+proposed setting in 16-bit, traces it, checks it against CPU, and scores it by inference time on
+one core (median of 30 calls). One setting is shared by the three matmuls, which leaves 72 legal
+settings. Code and logs: `inference/kopt16.py`, `inference/loop16/`.
+
+*Ground truth:* all 72 settings measured on the chip. 69 ran correctly and 3 failed to compile (the
+ones with N=8 and K=32). Best 2,860 µs (2/4/8), median 3,746 µs, worst 8,635 µs (1/1/1), a 3.02x
+spread. 10 of 72 are within 2% of the best. None failed the accuracy bar.
+
+*Five runs of the loop, 10 attempts each, one per seat, each with its own Qwen3-8B server:*
+
+| Start | Start time (µs) | Best found (µs) | Setting found |
+|---|---|---|---|
+| 2/2/2 | 3,828 | 2,894 | 4/4/32 |
+| 1/1/1 | 8,628 | 2,867 | 4/4/8 |
+| 1/8/1 | 6,415 | 2,862 | 2/4/8 |
+| 4/1/1 | 6,640 | 2,879 | 2/8/4 |
+| 1/1/8 | 8,465 | 2,891 | 2/8/8 |
+
+| Arm | Runs | Median final time (µs) | Worst (µs) | Runs within 2% of best | Attempts with no measurement |
+|---|---|---|---|---|---|
+| Checker v5 + optimiser (Qwen3-8B) | 5 | 2,879 | 2,894 | 5 of 5 | 18 of 50 |
+| Random (no model), same five starts | 200 | 2,891 | 3,826 | 166 of 200 | 89 of 2,000 |
+| v5's menu + fixed rule (no model), same starts | 200 | 2,894 | 4,000 | 163 of 200 | 304 of 2,000 |
+
+For comparison, the same block in plain PyTorch at 16-bit takes 2,745 µs and the hand-found
+setting 4/4/4 takes 2,877 µs.
+
+- **Every loop run ended within 2% of the best setting**, 1.3x to 3.0x faster than its own start, and 4% to 5% behind plain PyTorch.
+- **This does not show the model beating random.** Random reaches within 2% in 83% of runs here, so five out of five is what random would do about 4 times in 10. It is five runs; no percentage should be quoted for the loop.
+- **Wasted attempts came back in a new form.** 9 attempts hit the buffer limit at compile, and in two runs the checker spent its last four or five attempts naming a move that was not on the menu ("Set K to 32" when K was already 32).
+- **Timing agrees across seats.** The two reference settings measured on all five seats agree to 0.15% and 0.17%, and 21 of 23 settings measured on more than one seat agree to 0.31% or better. Two settings did not repeat: 4/8/16 gave 3,057, 3,912 and 3,000 µs, and 4/4/8 gave 2,867 and 3,188 µs. The ground truth uses the median; we do not know the cause.
 
 **36-layer stack of 2048 × 2048 matmuls (seat 170).**
 
@@ -274,6 +311,7 @@ PyTorch baseline.
 - Repeating a run from the same start is not independent, because the served model answers the same prompt almost identically each time. Every run therefore starts from a different setting.
 - The first 200-run baselines did not use the same starts as the model arms. They were rerun from the same starts, and the tables above use the rerun.
 - A fresh `torch_neuronx` environment could not compile anything until one dependency was pinned (`inference/README.md`).
+- In the 16-bit in-model experiment, two of 72 settings gave times that differed by 11% and 30% between repeats.
 - The hardware profile of the 36-layer stack with the unblocked kernel would not capture, so that row has a wall-clock time only.
 
 ## 9. What we do not claim
