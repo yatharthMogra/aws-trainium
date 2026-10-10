@@ -8,7 +8,8 @@ them automatically: a **checker** agent reads measurements taken on the real chi
 agent edits the kernel, and the chip measures the result. Both agents are Qwen3-8B. No larger model is
 in the loop.
 
-The write-up and pitch are in `docs/` (`note.md`, `pitch.md`).
+The write-up and pitch are in `docs/` (`note.md`, `pitch.md`). For the idea without the jargon, start with
+`docs/explainer.md`.
 
 ## What is measured
 
