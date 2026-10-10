@@ -27,7 +27,7 @@ every run.
 
 Show `results/curve_s30_K256_M4096_N12288.png`.
 
-The shape is a rank-256 adapter layer from Qwen3-8B's own config. Only 4 of 96 settings are good,
+The shape is a rank-256 adapter-style layer sized to Qwen3-8B's own layer widths. Only 4 of 96 settings are good,
 and a bad one is 7 times slower. AWS's default settings do not even run here.
 
 > "Version one showed the model the raw profile. It lost badly to random guessing. We read the log.

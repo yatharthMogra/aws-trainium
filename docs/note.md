@@ -14,7 +14,7 @@ checker agent reads the chip's measurements and gives one instruction; an optimi
 the settings. No model larger than 8B is in the loop. Claude wrote the harness only.
 
 **On what.** Two shapes with full ground truth, every legal setting measured on the chip:
-2048 × 2048 (75 settings) and a rank-256 adapter shape taken from Qwen3-8B's config (96 settings).
+2048 × 2048 (75 settings) and a rank-256 adapter-style shape sized to Qwen3-8B's layer widths (96 settings).
 Plus one loop run on each of Qwen3-8B's four linear-layer shapes, and small traced models to
 measure real inference time.
 
@@ -167,6 +167,7 @@ run. "Within 2%" means 1,388.1 µs or faster. Source: `results/summary_K256_M409
 |---|---|---|---|---|---|
 | Random (no model) | 200 | 1,467.0 | 2,097.3 | 70 of 200 (35%) | 0 |
 | Menu + fixed rule (no model) | 200 | 1,361.0 | 2,044.9 | 155 of 200 (78%) | 0 |
+| v5's menu + fixed rule (no model) | 200 | 1,361.0 | 2,971.7 | 132 of 200 (66%) | 0 |
 | Optimiser on raw profile | 10 | 1,906.9 | 2,535.2 | 0 of 10 | 64 of 100 |
 | Optimiser + fixed sentence | 10 | 1,906.9 | 2,958.4 | 0 of 10 | 77 of 100 |
 | Checker v1 | 10 | 2,284.8 | 3,114.8 | 0 of 10 | 66 of 100 |
