@@ -34,6 +34,8 @@ Ten attempts per run, always keeping the fastest setting found. Nothing larger t
 and nothing is scored on a simulator. The on-chip checker (`chip.py`, `hwcheck.py`) is the part the
 hackathon's harness did not have.
 
+![Checker and optimiser loop on a Trainium2 core](architecture-diagram.jpeg)
+
 ## What we tried, and what we got
 
 Everything is from a Trainium2 NeuronCore, one physical core, verified against a reference on every
